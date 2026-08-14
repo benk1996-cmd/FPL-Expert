@@ -216,6 +216,84 @@ def match(
     typer.echo(f"\n{len(forecasts)} team-fixtures -> processed/match_forecasts")
 
 
+def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True):
+    """This gameweek's forecasts, with a forward valuation attached. Returns (frame, column).
+
+    Shared by `squad`, `report` and `myteam` so the three cannot drift apart on how a player
+    is valued — they did, and it is why `report` was recommending a different fifteen from
+    `squad` for the same gameweek.
+
+    Future weeks are PLANNING, not evaluation: no pre-deadline snapshot exists for them, so
+    they are forecast from the latest known state. That is what makes the live path immune to
+    the lookahead bug the backtest had — every future week is built from today, by
+    construction, so there is no second date to conflate.
+    """
+    from .data.snapshot import MissingSnapshotError
+    from .models.points import aggregate_gameweek
+    from .optimise.transfers import horizon_points
+    from .pipeline import forecast_gameweek
+
+    per_player = aggregate_gameweek(forecast_gameweek(gw))
+    if span <= 1:
+        return per_player, "expected_points"
+
+    if echo:
+        typer.echo(f"valuing over GW{gw}-{gw + span - 1} (horizon {span})")
+    by_gw = {gw: per_player}
+    for future in range(gw + 1, gw + span):
+        try:
+            by_gw[future] = aggregate_gameweek(forecast_gameweek(future, planning=True))
+        except (ValueError, KeyError, MissingSnapshotError) as exc:
+            if echo:
+                typer.echo(f"  GW{future}: unavailable ({exc}) — horizon truncated")
+            break
+
+    table = horizon_points(by_gw, decay=decay)
+    frame = per_player.merge(table, on="player_id", how="left")
+    # Fall back to the single gameweek, never to zero: a player missing from the forward
+    # frames is unvalued, not worthless, and zero would make him unsellable and unbuyable.
+    frame["horizon_points"] = frame["horizon_points"].fillna(frame["expected_points"])
+    return frame, "horizon_points"
+
+
+def _brief(path, latest, solution, gw, span, rules, plan=None, held=None) -> None:
+    """Write the weekly decision brief. One implementation, two entry points.
+
+    `report` solves an ideal squad from scratch and has no transfer plan to show; `myteam`
+    starts from the squad you own and does. Everything else — chip values, price movers, the
+    caveats — is common, and was previously present in `myteam` and silently missing from
+    `report`, which passed none of `build_report`'s optional arguments.
+    """
+    from pathlib import Path
+
+    from .optimise.chips import bench_boost_value, triple_captain_value
+    from .reporting.gw_report import build_report
+
+    if held is None:
+        held = solution.squad
+    bench_ids = set(solution.bench["player_id"])
+    captain_id = (
+        solution.captain.get("player_id") if hasattr(solution.captain, "get") else None
+    )
+    # Only the two chips that do not require rebuilding the squad. Wildcard and free hit are
+    # worth what a from-scratch rebuild would gain, which is a different question.
+    values = {
+        "bench_boost": bench_boost_value(held, bench_ids, "expected_points"),
+        "triple_captain": triple_captain_value(
+            solution.starting_xi, captain_id, "expected_points"
+        ),
+    }
+
+    risers, fallers = _price_moves(latest, held)
+    markdown = build_report(
+        latest, solution, gw, plan=plan, chip_values=values,
+        risers=risers, fallers=fallers,
+    )
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(markdown, encoding="utf-8")
+    return markdown
+
+
 @app.command()
 def squad(
     gw: int = typer.Option(1, "--gw"),
@@ -228,48 +306,35 @@ def squad(
 ) -> None:
     """Forecast a horizon of gameweeks and solve for the best legal squad, XI and captain.
 
-    Valued over several gameweeks, not one, because a squad is held rather than rented. A
-    single-gameweek objective divides each player's price by one week of return and therefore
-    refuses every premium: measured in the season simulator, myopic valuation dropped Haaland
-    from 34 starts in 38 to 2, and cost 296 season points. `--horizon 1` restores it.
+    Valued over several gameweeks rather than one, because a squad is held rather than rented.
+    A single-gameweek objective divides each player's price by one week of return and so
+    refuses every premium — on 2025-26 a myopic policy never owns Haaland at all, 0 of 38.
+
+    **The horizon is an unproven default, kept on asymmetry rather than evidence.** This
+    docstring previously claimed myopic "cost 296 season points"; that was measured when the
+    backtest's horizon was assembled from forecasts built AFTER the decision, and it is
+    withdrawn. Honestly measured over perturbed decision paths, the horizon is worth
+    +11 +/- 28 against myopic — indistinguishable from nothing, with the sign flipping between
+    seasons. Every parameter of it has since been swept without finding an improvement.
+
+    It stays because the two policies share only about a third of their squad, so switching it
+    off would change 8-10 of your 15 players on evidence that cannot tell the options apart.
+    `--horizon 1` restores the myopic behaviour. See DECISIONS.
     """
     _setup_logging(verbose)
     import warnings
 
     from .config import load_config, load_scoring_rules
-    from .data.snapshot import MissingSnapshotError
     from .data.storage import write_table
-    from .models.points import aggregate_gameweek
     from .optimise.squad import select_squad
-    from .optimise.transfers import horizon_points
     from .pipeline import forecast_gameweek
 
     warnings.filterwarnings("ignore")
     cfg, rules = load_config(), load_scoring_rules()
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
 
-    forecasts = forecast_gameweek(gw)
-    per_player = aggregate_gameweek(forecasts)
-    write_table(forecasts, "processed", "player_forecasts", gw=gw)
-
-    points_col = "expected_points"
-    if span > 1:
-        typer.echo(f"valuing over GW{gw}-{gw + span - 1} (--horizon {span})")
-        by_gw = {gw: per_player}
-        for future in range(gw + 1, gw + span):
-            try:
-                by_gw[future] = aggregate_gameweek(
-                    forecast_gameweek(future, planning=True)
-                )
-            except (ValueError, KeyError, MissingSnapshotError) as exc:
-                typer.echo(f"  GW{future}: unavailable ({exc}) — horizon truncated")
-                break
-        table = horizon_points(by_gw, decay=cfg.optimise.future_decay)
-        per_player = per_player.merge(table, on="player_id", how="left")
-        per_player["horizon_points"] = per_player["horizon_points"].fillna(
-            per_player["expected_points"]
-        )
-        points_col = "horizon_points"
+    write_table(forecast_gameweek(gw), "processed", "player_forecasts", gw=gw)
+    per_player, points_col = _horizon_frame(gw, span, cfg.optimise.future_decay)
 
     solution = select_squad(
         per_player,
@@ -696,35 +761,47 @@ def repeat(
 @app.command()
 def report(
     gw: int = typer.Option(1, "--gw"),
+    horizon: int = typer.Option(None, "--horizon", help="Gameweeks to value over"),
     out: str = typer.Option(None, "--out", help="Write markdown here instead of stdout"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    """Produce the weekly decision brief: squad, captain, risks and differentials."""
+    """The weekly decision brief for an ideal squad: XI, captain, chips, risks and prices.
+
+    Use `fpl myteam --brief` instead once you own a squad — it starts from the players you
+    actually hold and can therefore recommend transfers, which this cannot.
+
+    Valued over the same horizon as `fpl squad`, and no longer on a single gameweek. The two
+    commands previously disagreed about which fifteen to buy for the same week, because this
+    one defaulted to `expected_points` while `squad` used `horizon_points`. It also passed
+    none of `build_report`'s optional arguments, silently dropping the chip and price
+    sections the reporting layer was written to render.
+    """
     _setup_logging(verbose)
     import warnings
     from pathlib import Path
 
-    from .config import load_scoring_rules, project_root
-    from .models.points import aggregate_gameweek
+    from .config import load_config, load_scoring_rules, project_root
     from .optimise.squad import select_squad
-    from .pipeline import forecast_gameweek
-    from .reporting.gw_report import build_report
 
     warnings.filterwarnings("ignore")
-    rules = load_scoring_rules()
-    forecasts = aggregate_gameweek(forecast_gameweek(gw))
+    cfg, rules = load_config(), load_scoring_rules()
+    span = horizon if horizon is not None else cfg.optimise.horizon_gws
+
+    latest, points_col = _horizon_frame(gw, span, cfg.optimise.future_decay)
     solution = select_squad(
-        forecasts,
+        latest,
         budget=rules["squad"]["budget"],
         squad_quota=rules["squad"]["positions"],
         formation=rules["squad"]["formation"],
         max_per_club=rules["squad"]["max_per_club"],
+        points_col=points_col,
+        # A horizon column already prices the armband through `captaincy_uplift`; doubling
+        # the captain on top of it counts the premium twice.
+        double_captain=points_col == "expected_points",
     )
-    markdown = build_report(forecasts, solution, gw)
 
     path = Path(out) if out else project_root() / "data" / "processed" / f"gw{gw}_report.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(markdown, encoding="utf-8")
+    markdown = _brief(path, latest, solution, gw, span, rules)
     typer.echo(markdown if out is None else f"written -> {path}")
 
 
@@ -882,17 +959,16 @@ def _price_moves(latest, held):
 def _write_myteam_brief(path, latest, held, squad, plan, gw, span, rules) -> None:
     """The weekly brief for a squad you actually own — transfers, chips and prices together.
 
-    Kept out of `report`, which solves for an ideal squad from scratch. Chip advice and
-    transfer advice are only meaningful against a squad you hold, so they belong here.
+    Differs from `report` in exactly one respect: the squad is the one you hold rather than
+    one solved from scratch, so a transfer plan is meaningful. Everything after that is
+    `_brief`, shared with `report`, because the two drifted apart once already — `report`
+    passed none of `build_report`'s optional arguments and silently rendered no chip or
+    price section at all.
     """
-    from pathlib import Path
-
     import pandas as pd
 
     from .backtest.season_sim import pick_xi
-    from .optimise.chips import bench_boost_value, triple_captain_value
     from .optimise.squad import SquadSolution
-    from .reporting.gw_report import build_report
 
     ranked, starters = pick_xi(held, rules, "expected_points")
     bench = ranked.drop(index=starters.index)
@@ -910,27 +986,7 @@ def _write_myteam_brief(path, latest, held, squad, plan, gw, span, rules) -> Non
         status="held squad",
     )
 
-    # Only the two chips that do not require rebuilding the squad are valued here. Wildcard
-    # and free hit are worth what a from-scratch rebuild would gain, which is a different
-    # question and belongs with the transfer plan rather than beside it.
-    values = {
-        "bench_boost": bench_boost_value(
-            held, set(bench["player_id"]), "expected_points"
-        ),
-        "triple_captain": triple_captain_value(
-            starters,
-            captain["player_id"].iloc[0] if not captain.empty else None,
-            "expected_points",
-        ),
-    }
-
-    risers, fallers = _price_moves(latest, held)
-    markdown = build_report(
-        latest, solution, gw, plan=plan, chip_values=values,
-        risers=risers, fallers=fallers,
-    )
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(markdown, encoding="utf-8")
+    _brief(path, latest, solution, gw, span, rules, plan=plan, held=held)
     typer.echo(f"\nbrief written -> {path}")
 
 
