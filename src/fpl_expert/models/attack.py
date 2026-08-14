@@ -149,6 +149,20 @@ def penalty_shares(players: pd.DataFrame, order_col: str = "penalties_order") ->
     Read from the live API at inference. The archive has no set-piece order column, so this
     cannot be a training feature — the same train/serve split as the availability gate.
     Players with no listed order take no penalties, which is very nearly true.
+
+    **Two known limitations, both live-only and neither measurable by the backtest** (where
+    `penalty_share` is 0 on every row, so none of this happens). See DECISIONS.
+
+    1. A JOBSHARE cannot be expressed. `PENALTY_ORDER_SHARE` maps ordinal position to a fixed
+       share, so two genuine co-takers listed 1 and 2 come out 0.85/0.11 rather than even.
+       Checked against a published takers list: right on 14 of 20 clubs, but Arsenal and
+       Sunderland were both alternating pairs and both got the ordinal split.
+       `penalties_text` carries FPL's own note describing exactly this, and is unused.
+    2. The taker's penalty xG is counted TWICE. His `xg_per90` comes from Opta's
+       `expected_goals`, which includes penalties, and `allocate_team_goals` then adds
+       `expected_penalty_goals` on top of an open-play share derived from that same inflated
+       rate. Worth ~9.5% of a taker's expected goals. Netting it out needs penalties taken per
+       player, which the archive does not store.
     """
     if order_col not in players.columns:
         return pd.Series(0.0, index=players.index)

@@ -1217,6 +1217,49 @@ state — structurally what `forecast_horizon` now reproduces. That asymmetry is
 backtest flattered itself: it had access to a kind of information the live system cannot get,
 and the headline totals were therefore never reproducible live. Now they are.
 
+## Penalty xG is counted twice, live only (2026-08-14) — UNFIXED, and unmeasurable here
+
+Found while checking whether free-kick and corner order could be modelled the same way as
+penalties. The answer is no, and the reason is that the penalty term itself has a defect.
+
+`xg_per90` comes from the archive's `expected_goals`, which is Opta's and **includes penalty
+xG at 0.79 a spot-kick**. Nothing nets it out — `RATE_STATS` takes `expected_goals` whole. So a
+designated taker's rate already embeds his penalties. `allocate_team_goals` then computes his
+open-play share *from that inflated rate* and adds `expected_penalty_goals` on top:
+
+    raw    = xg_per90 x 90s x finishing        <- already contains his penalty xG
+    share  = raw / raw.sum()
+    goals  = share x open_play_total + expected_penalty_goals
+
+The team total is conserved by the rescale, so calibration cannot see it. What is wrong is the
+SPLIT: the taker is over-weighted against his own team-mates. Measured on the GW1 forecast, the
+explicit term is **9.5% of a taker's expected goals** (median across 55 takers).
+
+**The backtest is structurally blind to this.** `penalty_share` is 0 on every historical row —
+the archive has no set-piece column — so the double count never occurs there. The 1.0000
+calibration, the ablation and the +399 result against form are all silent on it. It exists only
+in the live path, which is the path nobody has measured.
+
+Not fixed, because it cannot be fixed exactly: netting penalty xG out of the rate needs
+penalties taken or scored per player, and the archive stores `penalties_missed` but neither of
+those. An approximation is possible. Validating it is not — see the noise floor entry, and the
+five principled fixes that have measured to nothing.
+
+Recorded rather than patched, in line with "fix causes, not symptoms": a guessed correction on
+top of an unmeasurable defect would make the code harder to reason about without making the
+forecast better.
+
+### The jobshare limitation, found the same day
+
+`PENALTY_ORDER_SHARE = {1: 0.85, 2: 0.11, 3: 0.03}` maps ordinal position to a fixed share, so
+two co-takers listed 1 and 2 can never come out even. Verified against a published takers list:
+14 of 20 clubs agree exactly on the primary taker, but Arsenal (Saka and Gyokeres) and
+Sunderland (Le Fee and Diarra) are true 50/50s and the model gives them 0.85/0.11 — a ~70%
+over-allocation to Saka, a premium asset where it matters most.
+
+`penalties_text` is ingested and unused; it carries FPL's own note, which is where a jobshare is
+described. That is the route to detecting them from data rather than from a hardcoded list.
+
 ## The price-only baseline is degenerate and is RETIRED (2026-08-12)
 
 This file and the README have treated "pick purely on price" as the bar worth clearing for

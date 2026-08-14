@@ -340,6 +340,55 @@ injury gate the live pipeline applies. This cannot be fixed retrospectively. It 
 - Top-10k effective ownership (`fpl ownership`) — needs completed gameweeks.
 - `fpl myteam` — needs the user's FPL entry id, still not supplied.
 - Snapshot accumulation — the scheduled task fires before the GW1 deadline.
-- Live set-piece order, which the API carries and the archive does not. Note this is worth
-  more than it looks: `penalty_share` is 0 on every backtest row, so penalty takers are
-  currently invisible to the model and will not be once the season starts.
+
+**Set-piece order is NOT blocked and was never blocked** — this list said it was, wrongly,
+until 2026-08-14. The FPL API publishes `penalties_order`, `direct_freekicks_order` and
+`corners_and_indirect_freekicks_order`; ingestion has always captured them; and
+`pipeline.py` has always fed `penalty_share` into the allocator. 55 players carry a live
+penalty share right now. What is blocked is only the BACKTEST, because the archive has no
+set-piece column — which is why `penalty_share` is 0 on every historical row. That is an
+asymmetry in our favour and is listed under the permanent limitation above, not here.
+
+## Set-piece order: three findings, 2026-08-14
+
+Verified against a published community takers list. **14 of 20 clubs agree exactly on the
+primary taker**, including all four "nailed on" (Thiago, Palmer, Haaland, B.Fernandes) and
+Fulham's Robinson, a £4.5m DEFENDER on penalties.
+
+### 1. The model cannot represent a jobshare — the one real defect
+
+    PENALTY_ORDER_SHARE = {1: 0.85, 2: 0.11, 3: 0.03}
+
+Arsenal (Saka and Gyokeres, "whoever fancies it") and Sunderland (Le Fee and Diarra,
+alternating) are true 50/50s. The table maps ordinal position to a fixed share, so two
+co-takers listed 1 and 2 can never come out even: Saka is allocated 0.85 where ~0.5 is right,
+a ~70% over-allocation of penalty value to a premium asset.
+
+`penalties_text` is ingested and unused. It carries FPL's own free-text note, which is where a
+jobshare is described — a route to detecting them without hardcoding anyone's list.
+
+### 2. A designated taker's penalty xG is counted TWICE, and only in the live path
+
+`xg_per90` is built from the archive's `expected_goals`, which includes penalty xG at 0.79 a
+spot-kick. So a historical taker's rate already embeds his penalties. `allocate_team_goals`
+then computes his open-play share FROM that inflated rate and adds `expected_penalty_goals` on
+top. The team total is conserved by the rescale, but the taker is over-weighted against his
+own team-mates. The explicit term is **9.5% of a taker's expected goals** (median, GW1).
+
+**The backtest cannot detect this.** `penalty_share` is 0 on every historical row, so the
+double count never occurs there — the 1.0000 calibration and the +399 result are both silent
+on it. It is live-only and has never been measured.
+
+Fixing it properly needs penalty xG netted out of the rate, and the archive records
+`penalties_missed` but not penalties taken or scored, so it cannot be done exactly from what
+is stored. An approximation is possible; validating it is not.
+
+### 3. Free kicks and corners are ingested and unused — and should probably stay that way
+
+`direct_freekicks_order` (59 players) and `corners_and_indirect_freekicks_order` (80) reach
+`interim/players` and go no further. The obvious build is an uplift mirroring penalties.
+**Do not** — it would compound finding 2. A regular corner taker's assists from corners are
+already in his `xa_per90`, and a free-kick specialist's goals are already in his `xg_per90`;
+an uplift on top double counts exactly as the penalty term does, for a much smaller effect
+(direct FK conversion is ~5-8%). Set-piece order adds information only where duty has
+CHANGED, and the archive has no historical duty to compare against.
