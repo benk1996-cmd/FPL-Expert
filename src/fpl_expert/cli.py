@@ -860,38 +860,21 @@ def publish(
     except (FileNotFoundError, KeyError) as exc:
         typer.echo(f"  fixtures unavailable ({exc}) — the difficulty grid will be omitted")
 
-    # A second view of the same gameweek, with team minutes constrained to eleven players.
-    # Published alongside rather than instead: it improves the FORECAST (player MAE 15.02 ->
-    # 14.84, team totals 970 -> 990) but its effect on season points flips sign between
-    # seasons (-90 / +77 / +51), so neither view has earned the right to be the only one.
-    variants = {}
-    try:
-        budget_frame, budget_col = _horizon_frame(
-            gw, span, cfg.optimise.future_decay, echo=False, balance_minutes=True
-        )
-        variants["minutes budget"] = (
-            budget_frame,
-            select_squad(
-                budget_frame,
-                budget=rules["squad"]["budget"],
-                squad_quota=rules["squad"]["positions"],
-                formation=rules["squad"]["formation"],
-                max_per_club=rules["squad"]["max_per_club"],
-                points_col=budget_col,
-                double_captain=budget_col == "expected_points",
-            ),
-        )
-    except (ValueError, KeyError, RuntimeError) as exc:
-        typer.echo(f"  minutes-budget view unavailable ({exc}) — publishing the standard one")
-
+    # A minutes-budget view was published here alongside the standard one and has been
+    # REMOVED. It improves minutes accuracy (player MAE 15.02 -> 14.84) but is worse on points
+    # in every season tested: MAE +0.0025/+0.0088/+0.0011 and, decisively, the realised points
+    # of the twenty players it most wants fall by 0.025/0.050/0.088. The rescale moves value
+    # away from the players who actually score — deep squads are scaled down hardest and that
+    # is where the high scorers are (-0.034 expected points for the top 5% of actual scorers,
+    # +0.012 for everyone else). Offering it as a choice implied the evidence was balanced.
+    # `balance_team_minutes` remains available for anyone re-testing the idea. See DECISIONS.
     risers, fallers = _price_moves(latest, solution.squad)
     brief = _brief(
         directory / "brief.md", latest, solution, gw, span, rules,
     )
     write_bundle(
         directory, gw=gw, span=span, players=latest, solution=solution, brief=brief,
-        variants=variants, fixtures=grid, risers=risers, fallers=fallers,
-        points_col=points_col,
+        fixtures=grid, risers=risers, fallers=fallers, points_col=points_col,
     )
     typer.echo(f"\nbundle -> {directory}")
     typer.echo(solution.summary())

@@ -1217,7 +1217,7 @@ state — structurally what `forecast_horizon` now reproduces. That asymmetry is
 backtest flattered itself: it had access to a kind of information the live system cannot get,
 and the headline totals were therefore never reproducible live. Now they are.
 
-## Team minutes budget (2026-08-14) — BUILT, forecast improves, decisions unresolved
+## Team minutes budget (2026-08-14) — BUILT, then REJECTED on points accuracy
 
 A team plays eleven players for ninety minutes. The per-player minutes model cannot see that —
 it scores everyone independently — so nothing constrains a squad's expectations. Measured on
@@ -1249,20 +1249,42 @@ Not a null — a LARGE effect whose sign depends on the season, each per-season 
 clear of zero. Exactly what `per_season_paired` exists to separate from genuine nulls; pooling
 would have reported a bland +12.8 and hidden it.
 
-**Off by default, and published as an alternative view instead.** `fpl publish` writes both,
-and the Streamlit app offers a switch, because the evidence does not choose. Two things weigh
-against simply adopting it and one weighs for:
+### REJECTED, after comparing the forecasts directly rather than through the optimiser
 
-* Against: sixth principled bias fix in a row to fail the adoption rule, and 2023-24 has now
-  preferred the incumbent on every one of eleven variants tested.
-* For: it enforces a constraint that is arithmetically TRUE rather than a tuned preference, and
-  the backtest tests it in the mildest possible regime — historical frames sit at 978/990
-  because they contain only players with a fixture row, while live frames sit at 912 with a
-  399-1236 range. The place it helps most is the place the backtest cannot see, which is the
-  same structural blindness as the availability gate and the penalty double-count.
+It was briefly published as an alternative view with a switch in the app. That was wrong, and
+the reason is worth recording: **"the forecast improves" was a claim about MINUTES that got
+generalised to the forecast as a whole.** On POINTS it goes the other way, in every season.
 
-On the live GW1 frame the two views share **7 of 15** players. The budget view buys Haaland and
-drops Senesi, so this is not a cosmetic difference.
+Comparing the two forecasts directly — no optimiser, so no 40-point noise floor to hide in:
+
+    budget minus standard      2023-24   2024-25   2025-26
+    points MAE                 +0.0025   +0.0088   +0.0011    worse 3/3
+    top-20 realised points      -0.025    -0.050    -0.088    worse 3/3
+    spearman                   +0.0003   +0.0005   +0.0005    better, negligible
+
+`top20_hit` — the realised points of the twenty players the model most wants — is the
+decision-relevant metric, and it is worse in all three seasons. A consistent sign across every
+season is the strongest evidence this project accepts, and here it runs against the change.
+
+**The mechanism explains it.** The rescale is proportional, so deep squads are scaled down
+hardest — and deep squads are where the high scorers are:
+
+    rescale by squad size    squad 31 -> x1.031    squad 45 -> x1.016
+    expected-points change   top 5% of actual scorers  -0.034
+                             everyone else             +0.012
+
+It moves value away from the players who actually score, and inflates fringe players at thin
+squads into the top-20 list. Better minutes, worse player identification — which is what an FPL
+manager is actually buying.
+
+This also explains the -89.8 in 2023-24 that looked like an outlier in the season-points test.
+It was not noise; it was this.
+
+`balance_team_minutes` stays in the codebase, tested, off, and unused by any published path, so
+that anyone revisiting the idea starts from the measurement rather than the intuition. The
+constraint it enforces is still arithmetically true — a squad cannot play 1236 minutes — which
+is precisely why this is worth recording: **a true constraint, correctly implemented, made the
+thing we care about worse.**
 
 ## Defensive contribution has no opponent term, and should not (2026-08-14)
 

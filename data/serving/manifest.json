@@ -2,18 +2,12 @@
   "gameweek": 1,
   "horizon": 6,
   "points_col": "horizon_points",
-  "built_at": "2026-08-14T12:01:54+00:00",
+  "built_at": "2026-08-14T15:29:14+00:00",
   "players": 573,
   "variants": {
     "standard": {
       "squad_cost": 100.0,
       "expected_points": 48.16,
-      "captain": "B.Fernandes",
-      "vice_captain": "Szoboszlai"
-    },
-    "minutes budget": {
-      "squad_cost": 100.0,
-      "expected_points": 50.17,
       "captain": "B.Fernandes",
       "vice_captain": "Szoboszlai"
     }

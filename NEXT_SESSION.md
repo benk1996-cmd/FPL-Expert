@@ -309,6 +309,12 @@ Beyond the price-baseline problem at the top of this file:
   can cards. A better bonus model would not move anything.
 - **Negative-binomial defensive contributions.** Genuinely overdispersed, but modelling it
   improves defenders and worsens midfielders and forwards. Measured, rejected, recorded.
+- **A team minutes budget.** Built, tested and rejected. It enforces a constraint that is
+  arithmetically true (eleven players, ninety minutes; live frames run 399-1236 against a
+  ceiling of 990) and improves minutes accuracy, but is worse on POINTS in all three seasons:
+  MAE +0.003/+0.009/+0.001 and top-20 realised points -0.025/-0.050/-0.088. The rescale is
+  proportional, so deep squads are scaled down hardest and that is where the scorers are.
+  `balance_team_minutes` is kept, off and unused. See DECISIONS.
 - **An opponent term on defensive contribution.** Looks like an obvious gap — clean sheets are
   fixture-dependent, defcon is not — but the effect is entirely BETWEEN teams and already
   captured by the per-player rate. Within a player, defcon/90 is 6.93 on a clean sheet and

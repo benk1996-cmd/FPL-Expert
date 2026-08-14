@@ -66,11 +66,10 @@ manifest = bundle["manifest"]
 all_players = bundle["players"]
 age, tone = freshness(manifest["built_at"])
 
-# A bundle can carry alternative views of the same gameweek. Offered as a choice rather than
-# resolved for the reader, because the evidence does not resolve it: the minutes budget
-# improves the FORECAST (player MAE 15.02 -> 14.84, team totals 970 -> 990 against a hard
-# ceiling of eleven players x ninety minutes) but its effect on season points flips sign
-# between seasons (-90 / +77 / +51), so neither view has earned the right to be the only one.
+# A bundle CAN carry alternative views of the same gameweek, and the switch below renders only
+# when it does. Nothing currently publishes more than one: a minutes-budget view was offered
+# here and withdrawn, because it was worse on points in every season tested even though it
+# improved minutes. Offering a choice implies the evidence is balanced, and it was not.
 variants = list(manifest.get("variants") or {"standard": manifest})
 if "variant" in all_players.columns:
     variants = [v for v in variants if v in set(all_players["variant"])] or variants
@@ -217,17 +216,10 @@ if prices is not None and not prices.empty:
 
 with st.sidebar:
     if len(variants) > 1:
-        st.subheader("The two views")
+        st.subheader("Views")
         st.caption(
-            "**standard** scores every player independently. **minutes budget** additionally "
-            "forces each club's expected minutes to sum to eleven players — a constraint the "
-            "per-player model cannot see, and which live squads violate badly (399 minutes "
-            "for a thin squad, 1236 for one carrying 36 registered players)."
-        )
-        st.caption(
-            "It measurably improves the forecast, and its effect on season points is "
-            "unresolved: -90 / +77 / +51 across three backtested seasons. Shown as a choice "
-            "because the evidence does not make one for you."
+            f"This bundle carries {len(variants)} forecasts of the same gameweek. They differ "
+            "in how minutes or points are modelled, not in the outcome being predicted."
         )
     st.subheader("How to read this")
     st.caption(
