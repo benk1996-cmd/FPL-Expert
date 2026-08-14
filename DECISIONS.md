@@ -1217,6 +1217,93 @@ state — structurally what `forecast_horizon` now reproduces. That asymmetry is
 backtest flattered itself: it had access to a kind of information the live system cannot get,
 and the headline totals were therefore never reproducible live. Now they are.
 
+## Team minutes budget (2026-08-14) — BUILT, forecast improves, decisions unresolved
+
+A team plays eleven players for ninety minutes. The per-player minutes model cannot see that —
+it scores everyone independently — so nothing constrains a squad's expectations. Measured on
+the live GW1 frame:
+
+    team expected minutes    Hull 399   Coventry 554  ...  Spurs 1092  Chelsea 1236
+                             mean 912, budget 990, 70% of clubs short
+
+Chelsea's squad expects 13.7 players' worth of football and Hull's 4.4. The error tracks SQUAD
+SIZE, not injuries: 36 registered players accumulate 36 small probabilities where only eleven
+can play. `balance_team_minutes` rescales `p_short` and `p_long` by a common per-team factor,
+iterated because probabilities cap at one, preserving each player's short/long ratio so the
+shape of his distribution is unchanged. Gated players stay at zero.
+
+**The forecast improves, unambiguously:**
+
+    2024-25          team mins    sd      player MAE    bias    corr
+    baseline            970.0    33.2         15.02    -0.43    0.800
+    budget              989.9     0.2         14.84    +0.14    0.801
+
+**Season points do not resolve.** Ensemble, 8 paired paths per season:
+
+    pooled   +12.8   se 16.3   CI [-19.2, +44.7]        not adoptable
+    per season   2023-24 -89.8 +/- 2.2
+                 2024-25 +77.0 +/- 14.0
+                 2025-26 +51.0 +/- 10.6
+
+Not a null — a LARGE effect whose sign depends on the season, each per-season interval well
+clear of zero. Exactly what `per_season_paired` exists to separate from genuine nulls; pooling
+would have reported a bland +12.8 and hidden it.
+
+**Off by default, and published as an alternative view instead.** `fpl publish` writes both,
+and the Streamlit app offers a switch, because the evidence does not choose. Two things weigh
+against simply adopting it and one weighs for:
+
+* Against: sixth principled bias fix in a row to fail the adoption rule, and 2023-24 has now
+  preferred the incumbent on every one of eleven variants tested.
+* For: it enforces a constraint that is arithmetically TRUE rather than a tuned preference, and
+  the backtest tests it in the mildest possible regime — historical frames sit at 978/990
+  because they contain only players with a fixture row, while live frames sit at 912 with a
+  399-1236 range. The place it helps most is the place the backtest cannot see, which is the
+  same structural blindness as the availability gate and the penalty double-count.
+
+On the live GW1 frame the two views share **7 of 15** players. The budget view buys Haaland and
+drops Senesi, so this is not a cosmetic difference.
+
+## Defensive contribution has no opponent term, and should not (2026-08-14)
+
+Raised as a modelling gap: a low-defcon player in a strong defence can outscore a high-defcon
+player in a weak one, because clean sheets are fixture-dependent and worth more. Does the model
+weigh team defensive strength against individual defensive volume?
+
+**It does, and the top of the list is exactly that case:**
+
+    regular defenders, GW1        p_CS    pts_CS   defcon/90   pts_defcon   total
+    Gabriel      Arsenal          0.537    1.185      9.09        0.421      3.93
+    Botman     Newcastle          0.181    0.072     11.31        0.834      2.76
+
+Gabriel outscores Botman despite 20% less defensive volume, because his clean-sheet term is 16x
+larger. Team strength enters through `p_clean_sheet` and expected goals against, both produced
+per team-fixture by the Dixon-Coles/odds blend. Across regular defenders the two components run
+0.415 to 0.313 — clean sheets are worth more, but not overwhelmingly.
+
+**What looked like a real gap turned out to be correct.** `defensive_contribution_points` takes
+no opponent argument, so defcon is a static player rate. That seemed obviously wrong. Measured
+on 7,815 player-matches in 2025-26:
+
+    TEAM level     mean defcon/90 vs goals conceded per match    r = +0.46
+    WITHIN player  defcon/90 vs goals conceded that match        r = -0.055
+                   on a clean sheet 6.93      when conceding 6.92
+
+The team effect is real but lives entirely BETWEEN teams, not within them — the same player
+produces the same volume whether his side keeps a clean sheet or ships three. There is no
+fixture-level variation to model, and the between-team part is already captured by
+`defcon_per90` being an empirical per-player rate. An opponent adjustment would fit an effect
+the data says does not exist.
+
+Worth recording because it is the first design decision this session that turned out RIGHT for
+a reason nobody had written down. The static rate was not an unexamined default; it now has
+evidence behind it.
+
+One qualifier against reading the trade-off too cleanly: across defenders `p_clean_sheet` and
+`defcon_per90` correlate at only **-0.07**. Defcon varies far more by role — ball-winning
+centre-back against attacking full-back — than by team quality, so "strong defence implies low
+defcon" does not hold at player level even though it holds at team level.
+
 ## Penalty xG is counted twice, live only (2026-08-14) — UNFIXED, and unmeasurable here
 
 Found while checking whether free-kick and corner order could be modelled the same way as

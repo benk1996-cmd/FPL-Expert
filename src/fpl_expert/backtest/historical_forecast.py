@@ -37,6 +37,7 @@ import pandas as pd
 
 from ..features.rates import season_gw_index
 from ..models.match_sim import DixonColes, build_match_forecasts
+from ..models.minutes import balance_team_minutes
 from ..models.points import assemble
 from ..pipeline import player_rates
 
@@ -153,6 +154,7 @@ def forecast_horizon(
     market_weight: float = 0.8,
     rules: dict | None = None,
     odds: pd.DataFrame | None = None,
+    balance_minutes: bool = False,
 ) -> dict[int, pd.DataFrame]:
     """Forecast several gameweeks from ONE decision point, keyed by target gameweek.
 
@@ -199,6 +201,7 @@ def forecast_horizon(
                 history, features, minutes_model, state, rates, match_model,
                 season, as_of_gw, target,
                 market_weight=market_weight, rules=rules, odds=odds,
+                balance_minutes=balance_minutes,
             )
         except (ValueError, KeyError):
             # A horizon runs off the end of the season and over gameweeks the archive
@@ -213,7 +216,7 @@ def forecast_horizon(
 
 def _forecast_target(
     history, features, minutes_model, state, rates, match_model, season, as_of_gw, target,
-    *, market_weight, rules, odds,
+    *, market_weight, rules, odds, balance_minutes=False,
 ) -> pd.DataFrame:
     """One target gameweek, forecast from an already-built decision-week view of the league."""
     current = features[(features["season"] == season) & (features["GW"] == target)]
@@ -238,6 +241,9 @@ def _forecast_target(
     # Attached positionally, not merged on name: a player has one row per fixture, so a
     # double gameweek gives duplicate names and a name-keyed merge would explode.
     minutes = minutes_model.predict(current).reset_index(drop=True)
+    if balance_minutes:
+        # A team plays eleven players for ninety minutes; the per-player model cannot see that.
+        minutes = balance_team_minutes(minutes, current["team"].reset_index(drop=True))
 
     fixtures = fixtures_for_gameweek(history, season, target)
     if fixtures.empty:

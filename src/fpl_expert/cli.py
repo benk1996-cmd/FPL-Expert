@@ -217,7 +217,8 @@ def match(
     typer.echo(f"\n{len(forecasts)} team-fixtures -> processed/match_forecasts")
 
 
-def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True):
+def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True,
+                   balance_minutes: bool = False):
     """This gameweek's forecasts, with a forward valuation attached. Returns (frame, column).
 
     Shared by `squad`, `report` and `myteam` so the three cannot drift apart on how a player
@@ -234,7 +235,9 @@ def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True):
     from .optimise.transfers import horizon_points
     from .pipeline import forecast_gameweek
 
-    per_player = aggregate_gameweek(forecast_gameweek(gw))
+    per_player = aggregate_gameweek(
+        forecast_gameweek(gw, balance_minutes=balance_minutes)
+    )
     if span <= 1:
         return per_player, "expected_points"
 
@@ -243,7 +246,9 @@ def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True):
     by_gw = {gw: per_player}
     for future in range(gw + 1, gw + span):
         try:
-            by_gw[future] = aggregate_gameweek(forecast_gameweek(future, planning=True))
+            by_gw[future] = aggregate_gameweek(
+                forecast_gameweek(future, planning=True, balance_minutes=balance_minutes)
+            )
         except (ValueError, KeyError, MissingSnapshotError) as exc:
             if echo:
                 typer.echo(f"  GW{future}: unavailable ({exc}) — horizon truncated")
@@ -855,13 +860,38 @@ def publish(
     except (FileNotFoundError, KeyError) as exc:
         typer.echo(f"  fixtures unavailable ({exc}) — the difficulty grid will be omitted")
 
+    # A second view of the same gameweek, with team minutes constrained to eleven players.
+    # Published alongside rather than instead: it improves the FORECAST (player MAE 15.02 ->
+    # 14.84, team totals 970 -> 990) but its effect on season points flips sign between
+    # seasons (-90 / +77 / +51), so neither view has earned the right to be the only one.
+    variants = {}
+    try:
+        budget_frame, budget_col = _horizon_frame(
+            gw, span, cfg.optimise.future_decay, echo=False, balance_minutes=True
+        )
+        variants["minutes budget"] = (
+            budget_frame,
+            select_squad(
+                budget_frame,
+                budget=rules["squad"]["budget"],
+                squad_quota=rules["squad"]["positions"],
+                formation=rules["squad"]["formation"],
+                max_per_club=rules["squad"]["max_per_club"],
+                points_col=budget_col,
+                double_captain=budget_col == "expected_points",
+            ),
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        typer.echo(f"  minutes-budget view unavailable ({exc}) — publishing the standard one")
+
     risers, fallers = _price_moves(latest, solution.squad)
     brief = _brief(
         directory / "brief.md", latest, solution, gw, span, rules,
     )
     write_bundle(
         directory, gw=gw, span=span, players=latest, solution=solution, brief=brief,
-        fixtures=grid, risers=risers, fallers=fallers, points_col=points_col,
+        variants=variants, fixtures=grid, risers=risers, fallers=fallers,
+        points_col=points_col,
     )
     typer.echo(f"\nbundle -> {directory}")
     typer.echo(solution.summary())

@@ -109,6 +109,29 @@ def defensive_contribution_points(
     players clear the bar only sometimes — which is precisely why the distribution matters
     more than the average.
 
+    **No opponent term, and that is deliberate — checked 2026-08-14.** It looks like an
+    omission: a defender facing Man City should surely make more tackles and blocks than one
+    facing a promoted side, and clean sheets are fixture-dependent, so why not this? Measured
+    on 7,815 player-matches of 60+ minutes in 2025-26, the only season carrying the stat:
+
+        TEAM level     mean defcon/90 vs goals conceded per match    r = +0.46
+                       Arsenal 6.46 / 0.64        Burnley 7.26 / 1.78
+        WITHIN player  defcon/90 vs goals conceded that match        r = -0.055
+                       on a clean sheet 6.93      when conceding 6.92
+
+    The team effect is real — weak defences do defend more — but it is entirely BETWEEN teams
+    and players, not within them. The same player produces the same defensive volume whether
+    his side keeps a clean sheet or ships three. So there is no fixture-level variation to
+    model, and the between-team part is already captured: `defcon_per90` is an empirical
+    per-player rate, so a Burnley defender's 7.26 and an Arsenal defender's 6.46 are measured
+    directly rather than inferred. An opponent adjustment on top would fit an effect the data
+    says does not exist.
+
+    Related, for anyone weighing defcon against clean sheets: across regular defenders the two
+    are barely substitutes, correlating at only -0.07. Defcon varies far more by ROLE — a
+    ball-winning centre-back against an attacking full-back — than by team quality, so a
+    strong defence does not systematically mean low defcon.
+
     Counts are treated as Poisson. They ARE overdispersed — measured against our own predicted
     rates on 2025-26, residual variance/mean is 1.78 for defenders, 1.60 for midfielders and
     1.49 for forwards — but modelling that does not consistently improve the number this

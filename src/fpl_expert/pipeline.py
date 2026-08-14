@@ -17,7 +17,12 @@ from .data.storage import read_table
 from .features.rates import decayed_totals, season_gw_index
 from .models.attack import attacking_rates, penalty_shares
 from .models.match_sim import DixonColes, build_match_forecasts
-from .models.minutes import MinutesModel, apply_availability_gate, build_features
+from .models.minutes import (
+    MinutesModel,
+    apply_availability_gate,
+    balance_team_minutes,
+    build_features,
+)
 from .models.points import assemble
 
 log = logging.getLogger(__name__)
@@ -124,7 +129,11 @@ def player_rates(history: pd.DataFrame, as_of: float) -> pd.DataFrame:
 
 
 def forecast_gameweek(
-    gw: int, *, market_weight: float = 0.8, planning: bool = False
+    gw: int,
+    *,
+    market_weight: float = 0.8,
+    planning: bool = False,
+    balance_minutes: bool = False,
 ) -> pd.DataFrame:
     """Expected points for every player in a gameweek, one row per player-fixture.
 
@@ -163,6 +172,15 @@ def forecast_gameweek(
         meta["chance_of_playing_next_round"].reset_index(drop=True),
         status=meta["status"].reset_index(drop=True),
     )
+    if balance_minutes:
+        # Eleven players, ninety minutes. The per-player model cannot see that constraint, and
+        # live frames violate it hard: 399 minutes for a thin promoted squad, 1236 for one
+        # carrying 36 registered players. Applied AFTER the availability gate so an
+        # unavailable player is never handed minutes his fit team-mates gave up.
+        minutes = balance_team_minutes(
+            minutes, players.set_index("name").reindex(current["name"])["team"]
+            .reset_index(drop=True)
+        )
     minutes["name"] = current["name"]
 
     # --- team-level match forecasts

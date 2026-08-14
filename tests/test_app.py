@@ -116,6 +116,49 @@ def test_a_missing_bundle_explains_itself_rather_than_crashing(tmp_path, monkeyp
     assert "publish" in text
 
 
+@pytest.fixture
+def two_variant_bundle(tmp_path):
+    """A bundle carrying both the standard and minutes-budget views."""
+    from fpl_expert.serving import write_bundle
+
+    players = _players()
+    squad = players.head(15)
+    other = players.tail(15).reset_index(drop=True)
+    write_bundle(
+        tmp_path, gw=1, span=6, players=players, solution=_Solution(squad, squad.head(11)),
+        brief="# Brief", variants={"minutes budget": (players, _Solution(other, other.head(11)))},
+    )
+    return tmp_path
+
+
+def test_both_views_are_stored_and_separable(two_variant_bundle):
+    from fpl_expert.serving import read_bundle
+
+    loaded = read_bundle(two_variant_bundle)
+    assert set(loaded["players"]["variant"]) == {"standard", "minutes budget"}
+    assert set(loaded["manifest"]["variants"]) == {"standard", "minutes budget"}
+    # each view keeps its OWN squad, or the toggle would show one squad under two labels
+    squads = {
+        name: set(g[g["in_squad"]]["player_id"])
+        for name, g in loaded["players"].groupby("variant")
+    }
+    assert squads["standard"] != squads["minutes budget"]
+
+
+def test_the_app_renders_a_two_variant_bundle(two_variant_bundle, monkeypatch):
+    app = _run(two_variant_bundle, monkeypatch)
+    assert not app.exception, [str(e) for e in app.exception]
+    assert app.radio, "no variant switch rendered"
+    assert set(app.radio[0].options) == {"standard", "minutes budget"}
+
+
+def test_a_single_variant_bundle_shows_no_switch(bundle, monkeypatch):
+    """One view is not a choice. A radio with a single option is noise."""
+    app = _run(bundle, monkeypatch)
+    assert not app.exception
+    assert not app.radio
+
+
 def test_the_bundle_carries_no_personal_data(bundle):
     """The bundle is committed and deployed, so it must describe the GAME and not the user.
     Anything entry-specific belongs in `fpl myteam --brief`, which stays local."""

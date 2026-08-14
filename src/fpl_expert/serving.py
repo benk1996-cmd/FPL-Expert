@@ -78,6 +78,40 @@ def fixture_grid(fixtures: pd.DataFrame, teams: pd.Series, gw: int, span: int) -
     ).sort_values(["team", "gw"]).reset_index(drop=True)
 
 
+def _label(players: pd.DataFrame, solution, name: str) -> pd.DataFrame:
+    """Tag one variant's players with its squad, XI and armband."""
+    served = players[_present(players, PLAYER_COLUMNS)].copy()
+    starters = set(solution.starting_xi["player_id"])
+    squad_ids = set(solution.squad["player_id"])
+    captain = solution.captain.get("player_id") if hasattr(solution.captain, "get") else None
+    vice = (
+        solution.vice_captain.get("player_id")
+        if hasattr(solution.vice_captain, "get") else None
+    )
+    served["variant"] = name
+    served["in_squad"] = served["player_id"].isin(squad_ids)
+    served["is_starter"] = served["player_id"].isin(starters)
+    served["is_captain"] = served["player_id"] == captain
+    served["is_vice"] = served["player_id"] == vice
+    return served
+
+
+def _summary(solution) -> dict:
+    captain = solution.captain.get("web_name", "") if hasattr(solution.captain, "get") else ""
+    vice = (
+        solution.vice_captain.get("web_name", "")
+        if hasattr(solution.vice_captain, "get") else ""
+    )
+    return {
+        "squad_cost": round(float(solution.total_cost), 1),
+        # This gameweek's XI plus armband — NOT the horizon objective the squad was chosen on.
+        # Conflating the two is exactly how `fpl squad` once reported 221 points for one week.
+        "expected_points": round(float(solution.expected_points), 2),
+        "captain": str(captain),
+        "vice_captain": str(vice),
+    }
+
+
 def write_bundle(
     directory: Path | str,
     *,
@@ -86,6 +120,7 @@ def write_bundle(
     players: pd.DataFrame,
     solution,
     brief: str,
+    variants: dict | None = None,
     fixtures: pd.DataFrame | None = None,
     risers: pd.DataFrame | None = None,
     fallers: pd.DataFrame | None = None,
@@ -99,18 +134,14 @@ def write_bundle(
     out = Path(directory)
     out.mkdir(parents=True, exist_ok=True)
 
-    served = players[_present(players, PLAYER_COLUMNS)].copy()
-    starters = set(solution.starting_xi["player_id"])
-    squad_ids = set(solution.squad["player_id"])
-    captain = solution.captain.get("player_id") if hasattr(solution.captain, "get") else None
-    vice = (
-        solution.vice_captain.get("player_id")
-        if hasattr(solution.vice_captain, "get") else None
+    # `variants` lets one bundle carry alternative views of the same gameweek — the standard
+    # forecast and the team-minutes-budget one, say — so a reader can compare rather than be
+    # handed a choice already made for them. The primary variant is always first.
+    everything = {"standard": (players, solution), **(variants or {})}
+    served = pd.concat(
+        [_label(frame, sol, name) for name, (frame, sol) in everything.items()],
+        ignore_index=True,
     )
-    served["in_squad"] = served["player_id"].isin(squad_ids)
-    served["is_starter"] = served["player_id"].isin(starters)
-    served["is_captain"] = served["player_id"] == captain
-    served["is_vice"] = served["player_id"] == vice
     served.to_parquet(out / "players.parquet", index=False)
 
     if fixtures is not None and not fixtures.empty:
@@ -135,13 +166,9 @@ def write_bundle(
         "horizon": int(span),
         "points_col": points_col,
         "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "players": len(served),
-        "squad_cost": round(float(solution.total_cost), 1),
-        # This gameweek's XI plus armband — NOT the horizon objective the squad was chosen on.
-        # Conflating the two is exactly how `fpl squad` once reported 221 points for one week.
-        "expected_points": round(float(solution.expected_points), 2),
-        "captain": str(solution.captain.get("web_name", "")) if captain else "",
-        "vice_captain": str(solution.vice_captain.get("web_name", "")) if vice else "",
+        "players": int(served["player_id"].nunique()),
+        "variants": {name: _summary(sol) for name, (_, sol) in everything.items()},
+        **_summary(solution),
         "has_prices": bool(moves),
         "has_fixtures": fixtures is not None and not fixtures.empty,
     }

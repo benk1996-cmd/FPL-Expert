@@ -63,19 +63,40 @@ except FileNotFoundError:
     st.stop()
 
 manifest = bundle["manifest"]
-players = bundle["players"]
+all_players = bundle["players"]
 age, tone = freshness(manifest["built_at"])
+
+# A bundle can carry alternative views of the same gameweek. Offered as a choice rather than
+# resolved for the reader, because the evidence does not resolve it: the minutes budget
+# improves the FORECAST (player MAE 15.02 -> 14.84, team totals 970 -> 990 against a hard
+# ceiling of eleven players x ninety minutes) but its effect on season points flips sign
+# between seasons (-90 / +77 / +51), so neither view has earned the right to be the only one.
+variants = list(manifest.get("variants") or {"standard": manifest})
+if "variant" in all_players.columns:
+    variants = [v for v in variants if v in set(all_players["variant"])] or variants
+    chosen = st.sidebar.radio("Prediction", variants, index=0) if len(variants) > 1 else variants[0]
+    players = all_players[all_players["variant"] == chosen]
+else:
+    chosen = "standard"                       # a bundle published before variants existed
+    players = all_players
+summary = (manifest.get("variants") or {}).get(chosen, manifest)
 
 st.title("FPL Expert")
 top = st.columns(5)
 top[0].metric("Gameweek", manifest["gameweek"])
-top[1].metric("Expected points", f"{manifest['expected_points']:.1f}", help="This gameweek's XI plus the armband — not the multi-week objective the squad was chosen on.")
-top[2].metric("Squad cost", f"£{manifest['squad_cost']:.1f}m")
-top[3].metric("Captain", manifest["captain"] or "—")
+top[1].metric(
+    "Expected points", f"{summary['expected_points']:.1f}",
+    delta=(None if chosen == "standard"
+           else round(summary["expected_points"] - manifest["expected_points"], 2)),
+    help="This gameweek's XI plus the armband — not the multi-week objective the squad was "
+         "chosen on. The delta compares this view against the standard one.",
+)
+top[2].metric("Squad cost", f"£{summary['squad_cost']:.1f}m")
+top[3].metric("Captain", summary["captain"] or "—")
 top[4].metric("Built", age, delta_color=tone)
 
 st.caption(
-    f"Valued over {manifest['horizon']} gameweeks · built "
+    f"**{chosen}** view · valued over {manifest['horizon']} gameweeks · built "
     f"{manifest['built_at'].replace('T', ' ')} · {manifest['players']} players. "
     "Advice is only as current as the bundle — republish after each deadline."
 )
@@ -195,6 +216,19 @@ if prices is not None and not prices.empty:
                 )
 
 with st.sidebar:
+    if len(variants) > 1:
+        st.subheader("The two views")
+        st.caption(
+            "**standard** scores every player independently. **minutes budget** additionally "
+            "forces each club's expected minutes to sum to eleven players — a constraint the "
+            "per-player model cannot see, and which live squads violate badly (399 minutes "
+            "for a thin squad, 1236 for one carrying 36 registered players)."
+        )
+        st.caption(
+            "It measurably improves the forecast, and its effect on season points is "
+            "unresolved: -90 / +77 / +51 across three backtested seasons. Shown as a choice "
+            "because the evidence does not make one for you."
+        )
     st.subheader("How to read this")
     st.caption(
         "**expected_points** is this gameweek. **horizon_points** is the discounted "

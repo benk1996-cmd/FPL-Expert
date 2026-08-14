@@ -143,6 +143,13 @@ That split is why the app deploys with `requirements-app.txt` — streamlit, pan
 and needs neither lightgbm, nor pulp, nor the archive. The bundle is versioned, so a hosted
 deployment needs no build step.
 
+The bundle carries **two views of the same gameweek** — the standard forecast and one with
+each club's expected minutes constrained to eleven players — and the app offers a switch. The
+constraint improves the forecast (player MAE 15.02 to 14.84, team totals 970 to 990 against a
+hard ceiling of 990) but its effect on season points flips sign between seasons (-90 / +77 /
++51), so neither view has earned the right to be the only one. On GW1 they share 7 of 15
+players.
+
 The bundle describes the **game, not your team**: no entry id, no held squad, no transfer plan,
 which is what makes it safe to commit and publish. `fpl myteam --brief` covers the rest and
 stays local.

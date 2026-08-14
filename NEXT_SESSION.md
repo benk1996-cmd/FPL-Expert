@@ -1,6 +1,6 @@
 # Next session — where to pick up
 
-Updated 2026-08-13. GW1 deadline is **2026-08-21 17:30 UTC**.
+Updated 2026-08-14. GW1 deadline is **2026-08-21 17:30 UTC**.
 
 Read `DECISIONS.md` first for *why* things are the way they are. This file is only *what to do
 next*.
@@ -54,7 +54,7 @@ These came out of things that went wrong. Breaking them has cost real work.
 
 ## State of play
 
-448 tests, clean lint. Three seasons, strict walk-forward, MILP transfers, BB+TC chips,
+453 tests, clean lint. Three seasons, strict walk-forward, MILP transfers, BB+TC chips,
 real selling prices, and — since 2026-08-12 — a **point-in-time planning horizon**. Figures
 below are ENSEMBLE means over 8-10 perturbed decision paths per season, not single replays:
 
@@ -309,6 +309,10 @@ Beyond the price-baseline problem at the top of this file:
   can cards. A better bonus model would not move anything.
 - **Negative-binomial defensive contributions.** Genuinely overdispersed, but modelling it
   improves defenders and worsens midfielders and forwards. Measured, rejected, recorded.
+- **An opponent term on defensive contribution.** Looks like an obvious gap — clean sheets are
+  fixture-dependent, defcon is not — but the effect is entirely BETWEEN teams and already
+  captured by the per-player rate. Within a player, defcon/90 is 6.93 on a clean sheet and
+  6.92 when conceding. Measured on 7,815 player-matches; see DECISIONS.
 - **Tuning rank-aware captaincy.** Built, measured, negative. The mechanism is correct and
   tested; the situation does not call for it.
 - **`flexibility_weight`.** At 0.1 it changes literally nothing (paired difference exactly

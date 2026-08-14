@@ -44,6 +44,10 @@ BUCKET_NAMES = {BUCKET_ZERO: "p_zero", BUCKET_SHORT: "p_short", BUCKET_LONG: "p_
 # The short bucket is deliberately not 30: substitute appearances cluster late in matches.
 BUCKET_MINUTES = {BUCKET_ZERO: 0.0, BUCKET_SHORT: 22.0, BUCKET_LONG: 85.0}
 
+# Eleven players for ninety minutes. A hard constraint the per-player model cannot see, since
+# it scores each player independently — see `balance_team_minutes`.
+TEAM_MINUTES_BUDGET = 11 * 90.0
+
 # Positions that are not real players. 'AM' rows are the defunct Assistant Manager entries
 # from 2024-25, which carry zero minutes forever and would bias every base rate downward.
 NON_PLAYER_POSITIONS = frozenset({"AM"})
@@ -302,6 +306,70 @@ def assemble_predictions(proba: np.ndarray, index=None) -> pd.DataFrame:
     # Appearance points: 1 for a short outing, 2 for 60+.
     out["expected_appearance_points"] = out["p_short"] * 1 + out["p_long"] * 2
     out["p_appear"] = out["p_short"] + out["p_long"]
+    return out
+
+
+def balance_team_minutes(
+    predictions: pd.DataFrame,
+    team: pd.Series,
+    *,
+    budget: float = TEAM_MINUTES_BUDGET,
+    max_iter: int = 25,
+    tolerance: float = 1.0,
+) -> pd.DataFrame:
+    """Rescale playing probabilities so each team's expected minutes sum to eleven players.
+
+    A team plays exactly 11 x 90 minutes. The minutes model does not know that — it scores
+    each player independently — so nothing stops a squad's expectations summing to anything at
+    all. Measured on the live GW1 frame: Hull 399 minutes, Chelsea 1236, mean 912 against a
+    budget of 990, with 70% of clubs short.
+
+    The error is driven by SQUAD SIZE rather than by injuries. A club with 36 registered
+    players accumulates 36 small probabilities where only eleven can play, and a thin promoted
+    squad accumulates too few. Both distort every downstream quantity, because expected minutes
+    multiply the attacking rates and the bucket probabilities gate appearance, clean-sheet and
+    defensive-contribution points.
+
+    `p_short` and `p_long` are scaled by a common per-team factor and `p_zero` takes the
+    remainder, so the SHAPE of a player's minutes distribution is preserved and only his
+    likelihood of featuring moves. Iterated because the probabilities are capped at one: a
+    single nailed starter cannot absorb more, so the excess redistributes to team-mates who
+    can, which is water-filling rather than a closed-form rescale.
+
+    Players already gated to zero stay at zero — an unavailable player is not a candidate for
+    the minutes his team-mates give up.
+    """
+    out = predictions.copy()
+    short = np.array(out["p_short"], dtype=float)
+    long_ = np.array(out["p_long"], dtype=float)
+    groups = pd.Series(team).reset_index(drop=True)
+
+    for index in groups.groupby(groups, sort=False).groups.values():
+        rows = np.asarray(index, dtype=int)
+        for _ in range(max_iter):
+            total = (short[rows] * BUCKET_MINUTES[BUCKET_SHORT]
+                     + long_[rows] * BUCKET_MINUTES[BUCKET_LONG]).sum()
+            if total <= 0 or abs(total - budget) < tolerance:
+                break
+            scaled = np.clip(short[rows] * (budget / total), 0.0, 1.0)
+            scaled_long = np.clip(long_[rows] * (budget / total), 0.0, 1.0)
+            # Renormalise any player pushed past certainty, keeping his short/long ratio.
+            over = scaled + scaled_long > 1.0
+            if over.any():
+                mass = (scaled + scaled_long)[over]
+                scaled[over] /= mass
+                scaled_long[over] /= mass
+            if np.allclose(scaled, short[rows]) and np.allclose(scaled_long, long_[rows]):
+                break                      # every player is saturated; nothing left to give
+            short[rows], long_[rows] = scaled, scaled_long
+
+    out["p_short"], out["p_long"] = short, long_
+    out["p_zero"] = np.clip(1.0 - short - long_, 0.0, 1.0)
+    out["expected_minutes"] = (
+        short * BUCKET_MINUTES[BUCKET_SHORT] + long_ * BUCKET_MINUTES[BUCKET_LONG]
+    )
+    out["expected_appearance_points"] = short * 1 + long_ * 2
+    out["p_appear"] = short + long_
     return out
 
 
