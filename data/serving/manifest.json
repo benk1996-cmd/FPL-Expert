@@ -1,0 +1,13 @@
+{
+  "gameweek": 1,
+  "horizon": 6,
+  "points_col": "horizon_points",
+  "built_at": "2026-08-14T09:44:21+00:00",
+  "players": 573,
+  "squad_cost": 100.0,
+  "expected_points": 48.16,
+  "captain": "B.Fernandes",
+  "vice_captain": "Szoboszlai",
+  "has_prices": false,
+  "has_fixtures": true
+}

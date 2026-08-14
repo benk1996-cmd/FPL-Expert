@@ -1,0 +1,5 @@
+# Front end only. The app reads a precomputed bundle, so it needs none of the modelling
+# stack — no lightgbm, no pulp, no statsmodels, and not the 185k-row archive.
+streamlit>=1.36
+pandas>=2.2
+pyarrow>=16.0

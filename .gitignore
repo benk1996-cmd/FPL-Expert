@@ -7,6 +7,12 @@ data/processed/
 data/external/
 data/raw/.cache/
 
+# data/serving/ is deliberately ABSENT from the list above and IS versioned. Do not add it
+# for symmetry with its siblings. It is ~120KB of forecasts, the solved squad, the fixture
+# grid and the brief — everything the Streamlit app reads — and committing it is what lets
+# the app deploy without the archive, the models or a build step. The page never runs the
+# pipeline; it reads what `fpl publish` wrote.
+
 # Uncomment to version the point-in-time snapshots alongside the code:
 # !data/raw/
 

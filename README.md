@@ -89,11 +89,6 @@ every manager owns exactly fifteen players, so ownership counts pin what the ave
 scored with no modelling in between, and the simulated field reproduces it within 0.3% —
 2014 / 2014, 1985 / 1991, 1958 / 1958 across the three seasons.
 
-The **myopic** column is the other uncomfortable comparison: the six-gameweek horizon beats it
-in two seasons and loses in one, mean -16. On leaky forecasts the horizon looked like the
-best-supported decision in the project (+213, positive in every season); on honest ones it is
-not distinguishable from having no horizon at all.
-
 Overall points calibration is **0.995**, but that headline averages errors of opposite sign —
 per season it is 0.985 / 0.997 / 1.004 — so treat the aggregate as less precise than it looks.
 Note that calibration is a property of the FORECAST and is unaffected by any of the above; the
@@ -130,6 +125,27 @@ zero in two seasons because the statistic only exists in 2025-26.)
 All data sources are free and keyless: the FPL API, the `vaastav` archive, and
 football-data.co.uk. Understat and FBref are unreachable/blocked, but the FPL API already
 supplies xG, xA and xGC per player per gameweek from 2022-23, which covers the need.
+
+## Front end
+
+```bash
+fpl publish --gw 1      # build the serving bundle (~120KB) — run after each deadline
+streamlit run app.py    # read it
+```
+
+The app **never runs the model**. `forecast_gameweek` loads the 185,000-row archive, rebuilds
+minutes features over all of it and refits Dixon-Coles on every call, and `fpl squad` repeats
+that once per horizon week — fine for a weekly command, hopeless per page view. `publish` does
+it once and writes `data/serving/`: forecasts, the solved squad, a fixture grid and the brief,
+with a manifest recording which gameweek it was built for and when.
+
+That split is why the app deploys with `requirements-app.txt` — streamlit, pandas, pyarrow —
+and needs neither lightgbm, nor pulp, nor the archive. The bundle is versioned, so a hosted
+deployment needs no build step.
+
+The bundle describes the **game, not your team**: no entry id, no held squad, no transfer plan,
+which is what makes it safe to commit and publish. `fpl myteam --brief` covers the rest and
+stays local.
 
 ## Setup
 

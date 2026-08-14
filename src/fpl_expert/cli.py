@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 import typer
 
@@ -803,6 +804,67 @@ def report(
     path = Path(out) if out else project_root() / "data" / "processed" / f"gw{gw}_report.md"
     markdown = _brief(path, latest, solution, gw, span, rules)
     typer.echo(markdown if out is None else f"written -> {path}")
+
+
+@app.command()
+def publish(
+    gw: int = typer.Option(1, "--gw"),
+    horizon: int = typer.Option(None, "--horizon", help="Gameweeks to value over"),
+    out: str = typer.Option(None, "--out", help="Bundle directory (default data/serving)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Build the serving bundle a front end reads: forecasts, squad, fixtures, brief.
+
+    Run this once after each deadline. The web app never runs the pipeline — `forecast_gameweek`
+    loads the whole archive and refits the match model on every call, which is fine weekly and
+    hopeless per page view. A few megabytes of parquet stands in for tens of seconds of work.
+
+    The bundle describes the GAME, not your team: no entry id, no held squad, no transfer plan.
+    That is what makes it safe to commit and deploy. `fpl myteam --brief` covers the rest.
+    """
+    _setup_logging(verbose)
+    import warnings
+
+    from .config import load_config, load_scoring_rules, project_root
+    from .data.storage import read_table
+    from .optimise.squad import select_squad
+    from .serving import fixture_grid, write_bundle
+
+    warnings.filterwarnings("ignore")
+    cfg, rules = load_config(), load_scoring_rules()
+    span = horizon if horizon is not None else cfg.optimise.horizon_gws
+    directory = Path(out) if out else project_root() / "data" / "serving"
+
+    latest, points_col = _horizon_frame(gw, span, cfg.optimise.future_decay)
+    solution = select_squad(
+        latest,
+        budget=rules["squad"]["budget"],
+        squad_quota=rules["squad"]["positions"],
+        formation=rules["squad"]["formation"],
+        max_per_club=rules["squad"]["max_per_club"],
+        points_col=points_col,
+        double_captain=points_col == "expected_points",
+    )
+
+    grid = None
+    try:
+        season = cfg.project.get("season", "2026-27").replace("/", "-")
+        fixtures = read_table("interim", "fixtures", season=season)
+        teams = read_table("interim", "teams", season=season).set_index("id")["name"]
+        grid = fixture_grid(fixtures, teams, gw, span)
+    except (FileNotFoundError, KeyError) as exc:
+        typer.echo(f"  fixtures unavailable ({exc}) — the difficulty grid will be omitted")
+
+    risers, fallers = _price_moves(latest, solution.squad)
+    brief = _brief(
+        directory / "brief.md", latest, solution, gw, span, rules,
+    )
+    write_bundle(
+        directory, gw=gw, span=span, players=latest, solution=solution, brief=brief,
+        fixtures=grid, risers=risers, fallers=fallers, points_col=points_col,
+    )
+    typer.echo(f"\nbundle -> {directory}")
+    typer.echo(solution.summary())
 
 
 @app.command()
