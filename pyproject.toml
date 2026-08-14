@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fpl-expert"
+version = "0.1.0"
+description = "Points forecasting and squad optimisation for Fantasy Premier League"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+fpl = "fpl_expert.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# B008 flags Typer's required idiom of calling typer.Option() in argument defaults.
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # PuLP 4.0 forward-compatibility notices; the current API is still correct.
+    "ignore:LpVariable.dicts is deprecated:DeprecationWarning",
+    "ignore:PULP_CBC_CMD is deprecated:DeprecationWarning",
+    "ignore:Constructing LpVariable:DeprecationWarning",
+]

@@ -1,0 +1,58 @@
+project:
+  name: fpl-expert
+  season: "2026/27"
+
+paths:
+  raw: data/raw
+  interim: data/interim
+  processed: data/processed
+  external: data/external
+
+data:
+  fpl_api_base: "https://fantasy.premierleague.com/api"
+  history_seasons: ["2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
+  request_delay_seconds: 1.0
+  cache_ttl_hours: 6
+
+model:
+  # exponential time decay on historical matches (per gameweek)
+  time_decay_half_life_gw: 20
+  # shrinkage of player per-90 rates toward position/team priors
+  min_minutes_for_full_weight: 900
+
+optimise:
+  horizon_gws: 6
+  # future gameweeks discounted: weight = decay ** t
+  future_decay: 0.84
+  transfer_hit_cost: 4
+  solver: HiGHS
+
+  # Objective: expected points core, with a configurable rank-aware layer on top.
+  #   lambda_rank = 0.0  -> pure expected-points maximisation (right for ~top-100k goals)
+  #   lambda_rank > 0.0  -> weights points scored AGAINST the field (differentials),
+  #                         which lowers E[points] but raises P(high rank).
+  # See PLAN.md Item 13. Requires effective ownership (see `ownership` below) and the
+  # full points distribution from Item 10 - not computable from point estimates.
+  objective:
+    # DECIDED: season target is top 10k -> the rank layer is committed, not optional.
+    # lambda_rank stays 0 until Item 13 is built and tuned against the season simulator
+    # (Item 14); tuning it without a backtest would just be guessing.
+    lambda_rank: 0.0
+    target_rank: 10000
+    field_size: 11000000    # approx; refreshed from bootstrap `total_players`
+
+ownership:
+  # Overall ownership is free and live in bootstrap-static (`selected_by_percent`).
+  # Top-10k ownership must be assembled from the Overall league (id 314).
+  overall_league_id: 314
+  top_n_managers: 10000
+  sample_size: 1000         # ~1.5% SE at p=0.5; full census only if tail precision needed
+  request_delay_seconds: 0.5
+  # Picks are only exposed AFTER a gameweek deadline, so EO for the gameweek we are
+  # deciding is always a FORECAST: last GW's picks + transfer-flow adjustment.
+  # Squad ownership is sticky (>90% week to week); captaincy is not and needs a model.
+  min_gw_for_top10k: 6      # before this the overall table is noise; fall back to overall EO
+
+backtest:
+  train_start_season: "2019-20"
+  walkforward_min_train_gws: 38

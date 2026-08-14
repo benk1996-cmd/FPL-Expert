@@ -1,0 +1,221 @@
+"""Match model: scoreline grids, clean sheets, and inverting the market."""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from fpl_expert.models.match_sim import (
+    DixonColes,
+    _conceded_penalty,
+    blend_lambdas,
+    clean_sheet_probabilities,
+    goals_conceded_distribution,
+    lambdas_from_odds,
+    match_features,
+    outcome_probabilities,
+    probability_over,
+    score_grid,
+)
+
+# --- the grid -------------------------------------------------------------
+
+
+def test_grid_is_a_probability_distribution():
+    grid = score_grid(1.5, 1.2, rho=-0.05)
+    assert grid.sum() == pytest.approx(1.0)
+    assert (grid >= 0).all()
+
+
+def test_outcomes_partition_the_grid():
+    home, draw, away = outcome_probabilities(score_grid(1.6, 1.1))
+    assert home + draw + away == pytest.approx(1.0)
+    assert home > away                       # stronger home lambda must win more often
+
+
+def test_clean_sheet_is_about_the_opponent_failing_to_score():
+    """Easy to invert. The HOME clean sheet is the AWAY team scoring zero."""
+    grid = score_grid(3.0, 0.2)              # away team barely threatens
+    cs_home, cs_away = clean_sheet_probabilities(grid)
+    assert cs_home == pytest.approx(np.exp(-0.2), abs=0.01)   # P(away scores 0)
+    assert cs_away == pytest.approx(np.exp(-3.0), abs=0.01)   # P(home scores 0)
+    assert cs_home > cs_away
+
+
+def test_goals_conceded_distributions_are_oriented_correctly():
+    home_conceded, away_conceded = goals_conceded_distribution(score_grid(2.5, 0.5))
+    # The home side concedes what the away side scores: lambda 0.5, so 0 is most likely.
+    assert home_conceded.argmax() == 0
+    assert away_conceded.argmax() == 2       # away concedes ~2.5
+
+
+def test_probability_over_line():
+    grid = score_grid(2.0, 2.0)
+    assert 0.6 < probability_over(grid, 2.5) < 0.85
+
+
+# --- the Dixon-Coles correction ------------------------------------------
+
+
+def test_tau_shifts_mass_between_low_scorelines():
+    """The correction exists because independent Poissons misprice exactly the scorelines
+    that decide clean sheets, so it must actually change them."""
+    plain = score_grid(1.4, 1.2, rho=0.0)
+    corrected = score_grid(1.4, 1.2, rho=-0.08)
+    assert corrected[0, 0] > plain[0, 0]     # more 0-0
+    assert corrected[1, 0] < plain[1, 0]     # fewer 1-0
+
+
+def test_zero_rho_reduces_to_independent_poisson():
+    grid = score_grid(1.5, 1.0, rho=0.0)
+    assert grid[0, 0] == pytest.approx(np.exp(-1.5) * np.exp(-1.0), rel=1e-6)
+
+
+# --- conceded penalty -----------------------------------------------------
+
+
+def test_conceded_penalty_is_minus_one_per_two_goals():
+    """FPL deducts 1 point per 2 goals conceded, rounded down: 0-1 costs nothing,
+    2-3 costs 1, 4-5 costs 2."""
+    certain_two = np.array([0.0, 0.0, 1.0])
+    assert _conceded_penalty(certain_two) == pytest.approx(-1.0)
+    certain_one = np.array([0.0, 1.0, 0.0])
+    assert _conceded_penalty(certain_one) == pytest.approx(0.0)
+    certain_four = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
+    assert _conceded_penalty(certain_four) == pytest.approx(-2.0)
+
+
+# --- inverting the market -------------------------------------------------
+
+
+def test_odds_inversion_round_trips():
+    """Generate odds from known goal expectations, invert, and recover them."""
+    true_home, true_away = 1.8, 0.9
+    grid = score_grid(true_home, true_away)
+    p_home, p_draw, p_away = outcome_probabilities(grid)
+    over = probability_over(grid, 2.5)
+
+    recovered_home, recovered_away = lambdas_from_odds(p_home, p_draw, p_away, over)
+    assert recovered_home == pytest.approx(true_home, abs=0.06)
+    assert recovered_away == pytest.approx(true_away, abs=0.06)
+
+
+def test_inversion_without_a_totals_line_still_works():
+    """1X2 alone pins the balance but not the total; it should still return sane values."""
+    home, away = lambdas_from_odds(0.5, 0.27, 0.23, None)
+    assert home > away > 0
+
+
+# --- blending -------------------------------------------------------------
+
+
+def test_blend_is_geometric_and_bounded_by_its_inputs():
+    blended = blend_lambdas((1.0, 2.0), (4.0, 1.0), market_weight=0.5)
+    assert blended[0] == pytest.approx(2.0)          # sqrt(1*4)
+    assert blended[1] == pytest.approx(np.sqrt(2.0))
+
+
+@pytest.mark.parametrize(("weight", "expected"), [(0.0, 1.0), (1.0, 4.0)])
+def test_blend_endpoints_select_one_source(weight, expected):
+    assert blend_lambdas((1.0, 1.0), (4.0, 4.0), weight)[0] == pytest.approx(expected)
+
+
+# --- fitting --------------------------------------------------------------
+
+
+TRUE_ATTACK = {"Strong": 0.45, "Good": 0.20, "MidA": 0.0, "MidB": 0.0, "Poor": -0.25, "Weak": -0.40}
+TRUE_DEFENCE = {"Strong": 0.40, "Good": 0.15, "MidA": 0.05, "MidB": -0.05, "Poor": -0.20, "Weak": -0.35}
+TRUE_INTERCEPT, TRUE_HOME_ADV = 0.2, 0.25
+
+
+def _synthetic_matches(seed=0, n_seasons=12):
+    """Matches generated by the model's own equations, so the fit has a right answer.
+
+    Generating from a different process than the one being fitted would test nothing
+    useful — the estimator would be blamed for a mis-specification we introduced.
+    """
+    rng = np.random.default_rng(seed)
+    teams = list(TRUE_ATTACK)
+    rows, date = [], pd.Timestamp("2020-01-01")
+    for _ in range(n_seasons):
+        for home in teams:
+            for away in teams:
+                if home == away:
+                    continue
+                lh = np.exp(TRUE_INTERCEPT + TRUE_ATTACK[home] - TRUE_DEFENCE[away] + TRUE_HOME_ADV)
+                la = np.exp(TRUE_INTERCEPT + TRUE_ATTACK[away] - TRUE_DEFENCE[home])
+                rows.append({
+                    "season": "s", "date": date, "home_team": home, "away_team": away,
+                    "home_goals": rng.poisson(lh), "away_goals": rng.poisson(la),
+                })
+                date += pd.Timedelta(days=1)
+    return pd.DataFrame(rows)
+
+
+def test_fit_recovers_team_strength_ordering_and_home_advantage():
+    model = DixonColes(half_life_days=10_000).fit(_synthetic_matches())
+    attack = [model.attack[t] for t in ("Strong", "Good", "MidA", "Poor", "Weak")]
+    assert attack == sorted(attack, reverse=True)
+    assert model.defence["Strong"] > model.defence["Weak"]
+    assert model.home_advantage == pytest.approx(TRUE_HOME_ADV, abs=0.08)
+
+
+def test_fit_recovers_strength_differences_not_just_ordering():
+    """Only differences are identified — the sum-to-zero constraint fixes the level — so
+    compare gaps rather than absolute values."""
+    model = DixonColes(half_life_days=10_000).fit(_synthetic_matches())
+    true_gap = TRUE_ATTACK["Strong"] - TRUE_ATTACK["Weak"]
+    fitted_gap = model.attack["Strong"] - model.attack["Weak"]
+    assert fitted_gap == pytest.approx(true_gap, abs=0.12)
+
+
+def test_fit_respects_the_as_of_cut():
+    """Matches at or after as_of must not influence the fit — that is the point-in-time
+    guarantee for this model."""
+    matches = _synthetic_matches()
+    cut = matches["date"].iloc[20]
+    model = DixonColes().fit(matches, as_of=cut)
+    # Only teams appearing before the cut can have been fitted.
+    seen = set(matches[matches["date"] < cut]["home_team"]) | set(
+        matches[matches["date"] < cut]["away_team"]
+    )
+    assert set(model.teams) <= seen
+
+
+def test_fit_rejects_an_empty_training_window():
+    matches = _synthetic_matches()
+    with pytest.raises(ValueError, match="no matches"):
+        DixonColes().fit(matches, as_of=pd.Timestamp("1999-01-01"))
+
+
+def test_promoted_team_is_treated_as_league_average():
+    """A club with no Premier League record must get an uninformative estimate, not be
+    dropped — same principle as the cold-start prior in the rate model.
+
+    Under the sum-to-zero constraint, 'league average' means attack and defence of exactly
+    zero, so the expected lambdas follow directly from the fitted intercept.
+    """
+    model = DixonColes(half_life_days=10_000).fit(_synthetic_matches())
+    home_lambda, away_lambda = model.lambdas("MidA", "Newly Promoted")
+
+    expected_home = np.exp(model.intercept + model.attack["MidA"] - 0.0 + model.home_advantage)
+    expected_away = np.exp(model.intercept + 0.0 - model.defence["MidA"])
+    assert home_lambda == pytest.approx(expected_home)
+    assert away_lambda == pytest.approx(expected_away)
+
+
+# --- team-level output ----------------------------------------------------
+
+
+def test_match_features_emits_one_row_per_team_with_mirrored_fields():
+    grid = score_grid(2.0, 0.8, rho=-0.05)
+    home, away = match_features(grid, "Arsenal", "Chelsea", 2.0, 0.8)
+
+    assert home["team"] == "Arsenal" and home["is_home"]
+    assert away["team"] == "Chelsea" and not away["is_home"]
+    # One side's goals-for is the other's goals-against.
+    assert home["expected_goals_for"] == away["expected_goals_against"]
+    assert home["p_win"] == pytest.approx(away["p_lose"])
+    assert home["p_clean_sheet"] > away["p_clean_sheet"]
+    assert home["expected_conceded_penalty"] > away["expected_conceded_penalty"]

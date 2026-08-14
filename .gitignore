@@ -1,0 +1,22 @@
+# Data is reproducible from the API and the archive — except raw/, which is the
+# point-in-time record and CANNOT be reconstructed after the fact. If you ever move this
+# project, copy data/raw/ManuallyOrLoseIt. It is small (JSON.gz) and it is the evidence
+# trail the backtest depends on.
+data/interim/
+data/processed/
+data/external/
+data/raw/.cache/
+
+# Uncomment to version the point-in-time snapshots alongside the code:
+# !data/raw/
+
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.env
