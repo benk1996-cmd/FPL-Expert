@@ -345,6 +345,53 @@ injury gate the live pipeline applies. This cannot be fixed retrospectively. It 
 
 ---
 
+## SHELVED — a sentiment/NLP reviewer over the model's predictions (2026-08-16)
+
+The idea: ingest qualitative team news and have it review or adjust the forecasts. It targets
+the right gap — every remaining blind spot is a MINUTES problem (no depth-chart reasoning, so
+"Saliba injured therefore Mosquera starts" is unavailable; no rotation awareness; no jobshare
+detection), and minutes is the largest single driver of variance.
+
+Shelved for three reasons, in order of weight:
+
+1. **There is no corpus, and building one is gated on hardware.** `news`, `status` and
+   `chance_of_playing_next_round` are overwritten in place, which is why `fpl snapshot` exists.
+   Three snapshots exist. A season would give ~2,200 labelled examples (~60 flagged players x
+   38 gameweeks) with free labels — the following week's minutes. But the scheduled task has
+   `WakeToRun=False` and `DisallowStartIfOnBatteries=True`, and three of the five deadline
+   checkpoints fall between 01:00 and 01:30 local, so the captures closest to each deadline
+   will often be missed. Changing those settings was declined; the machine is not to be
+   reconfigured. The task still runs opportunistically and costs nothing, so the corpus will
+   accumulate partially rather than not at all.
+
+2. **It could not be validated.** No historical news exists, so there is nothing to backtest
+   against. Six principled, well-reasoned improvements have now measured to nothing or worse —
+   including one enforcing a constraint that was arithmetically TRUE — and an unvalidatable NLP
+   layer would be the seventh with more moving parts than all of them combined.
+
+3. **"Reviewer over the predictions" is the wrong shape anyway.** If the signal is real it
+   belongs INSIDE the minutes model, not layered on the output: expected minutes propagate to
+   clean sheets (conditional on 60+), the defcon threshold, goal allocation and team-goal
+   conservation. Adjusting final expected points would break that consistency. A post-hoc
+   adjustment layer also gets judged on whether its output looks plausible, which is exactly
+   the self-grading trap `repeat_sim` fell into.
+
+**What would unblock it**, cheapest first:
+
+* Wire odds into the LIVE path. Bookmakers already ingest this qualitative information
+  professionally and price it, they cover all 20 clubs, and the live path currently attaches no
+  odds at all (`market_weight=0.8` is inert there). This is the cheap version of the same signal.
+* Parse `news` with rules rather than learning. "Expected back 21 Aug" is a hard date the model
+  ignores entirely — it reads only the numeric flag. A date parser is checkable within weeks,
+  because the label arrives seven gameweeks-days later, and needs no corpus.
+* A season of snapshots, for anything learned. Within-season walk-forward (train GW1-20, test
+  GW21-38) by January; held-out-season validation, this project's standard, not before 2027-28.
+
+**The larger prize, if snapshots do accumulate**, is not the reviewer. It is finally measuring
+what the availability gate is WORTH. The backtest runs with no gate at all, so "every number
+here is conservative by an unmeasurable amount" is literally true. One season of snapshots turns
+that permanent caveat into a number, and needs no new modelling.
+
 ## Blocked until the season starts (do not attempt now)
 
 - Top-10k effective ownership (`fpl ownership`) — needs completed gameweeks.
