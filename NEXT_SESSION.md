@@ -1,6 +1,7 @@
 # Next session — where to pick up
 
-Updated 2026-08-14. GW1 deadline is **2026-08-21 17:30 UTC**.
+Updated 2026-08-24. **The season has started.** GW1 is played (one fixture still live at the
+time of writing); GW2's deadline is **2026-08-28 17:30 UTC**.
 
 Read `DECISIONS.md` first for *why* things are the way they are. This file is only *what to do
 next*.
@@ -54,7 +55,7 @@ These came out of things that went wrong. Breaking them has cost real work.
 
 ## State of play
 
-453 tests, clean lint. Three seasons, strict walk-forward, MILP transfers, BB+TC chips,
+475 tests, clean lint. Three seasons, strict walk-forward, MILP transfers, BB+TC chips,
 real selling prices, and — since 2026-08-12 — a **point-in-time planning horizon**. Figures
 below are ENSEMBLE means over 8-10 perturbed decision paths per season, not single replays:
 
@@ -81,6 +82,55 @@ so quoting it as a hard bar understated this system by ~550 points a season for 
 Everything in `PLAN.md` is built. What follows is what is left.
 
 ---
+
+## 2026-08-24: the live path got its first real exercise, and it found things
+
+Nothing here changes a backtest number. All of it is the live path, which until this week had
+never been run against a started season.
+
+**Two bugs, both invisible until now.**
+
+* **Snapshot odds capture was silently discarding everything.** `normalise` returns a `date`
+  column of dtype `datetime64[us]`, `to_dict("records")` yields `pd.Timestamp` objects, and
+  `write_raw`'s `json.dumps` could not serialise them. Worse, it streamed into the open gzip
+  handle, so the failure left a TRUNCATED dump on disk — 66 bytes ending mid-field — while the
+  `except Exception` around the odds capture reported a clean snapshot holding zero rows. Not a
+  regression: the feed returned `[]` on 9 and 16 August, so there was nothing to serialise and
+  the bug could not fire until bookmakers began pricing. Fixed both halves — a narrow
+  `_json_default` (not `default=str`, which would let an unexpected type into the evidence
+  trail as a plausible string), and serialise-before-open so a failure leaves no file at all.
+  Verified: `odds_rows 10`. The corrupt partition was deleted.
+* **`data/serving/` is committed, and a `myteam` brief was sitting in it.** `--brief
+  data/serving/myteam_gw2.md` put a real squad one `git add` from being deployed, against the
+  boundary `test_the_bundle_carries_no_personal_data` exists to enforce. Now gitignored
+  (`data/serving/myteam_*.md`), along with `.fpl_entry.json`. **Anything entry-specific must
+  stay out of that directory** — it is the one data path that is versioned on purpose.
+
+**One stale docstring corrected.** `recommend_transfers` still carried a prominent call to
+re-derive the hit threshold. That work was done the very next day and the answer was no; the
+docstring now records the rejection, the numbers that killed it, and a warning not to re-open
+it on the strength of the 2.3x margin measurement alone. The superseded DECISIONS entry at
+"needs re-deriving" was left alone deliberately — it is a dated entry in an append-only log
+and the sweep entry below it supersedes it. **The stale-guidance risk is in docstrings, which
+a reader meets with no date attached.**
+
+**The front end grew two features and one hard limit.**
+
+* `advice.py` — `analyse_entry()` returns an `EntryAdvice`, and both `fpl myteam` and the app
+  call it. Extracted rather than duplicated because `report` and `myteam` already drifted once.
+* A **My Team tab**, and a **gameweek navigator** (◀ ▶) across the published horizon. The
+  navigator was nearly free: `_horizon_frame` already computed each week's forecast — the
+  horizon valuation is the decayed sum of them — and threw them away once summed. They are now
+  served as `forecasts.parquet` and the manifest carries `gameweeks`. Bundle 117KB -> 460KB,
+  publish no slower. **The squad shown is always the published week's decision**; stepping
+  forward answers "how does the squad I picked look next week", not "what would I pick", and
+  the UI says so, because re-solving needs the model.
+* **My Team cannot run on Streamlit Cloud, by design.** It needs `data/interim`,
+  `data/processed`, `data/external` and `data/raw/snapshot` — all gitignored, which is exactly
+  what lets the bundle deploy without the archive. The first attempt guarded `ImportError`,
+  which never fires there: the packages install fine and it is the DATA that is absent, so a
+  `FileNotFoundError` traceback reached the page. The tab now checks its inputs up front and
+  explains, rather than offering a button that spins for twenty seconds and fails.
 
 ## Everything previously listed here is now closed
 
@@ -288,6 +338,10 @@ frame-restricted anchor, not 0.3%.
 
 Beyond the price-baseline problem at the top of this file:
 
+0. **Weekly, now that the season is live:** `fpl snapshot` before each deadline (the scheduled
+   task mostly handles it), then `fpl publish --gw N` after it, then `fpl myteam --entry
+   3468852`. The published bundle is what the app serves, so a stale bundle is a stale page —
+   it showed GW1 for three days after GW1 kicked off because nothing had republished.
 1. **Simulated ranks need re-deriving.** Withdrawn, not replaced — they were computed against
    totals ~400 points too high. The field is anchored independently on the ownership identity,
    so only our side of the comparison moved, but it moved a long way.
@@ -364,6 +418,12 @@ Shelved for three reasons, in order of weight:
    reconfigured. The task still runs opportunistically and costs nothing, so the corpus will
    accumulate partially rather than not at all.
 
+   **Softened 2026-08-24.** The ladder self-heals — see the unblocked section above. A missed
+   48h or 24h rung is captured at the next hourly run the machine is awake for, just further
+   out; only the 2h and 0.5h rungs are lost for good. The corpus therefore accumulates in full
+   at coarse resolution and is thin only at the freshest end. That is still the end where team
+   news lands, so the argument stands, but the shortfall is narrower than "often missed" reads.
+
 2. **It could not be validated.** No historical news exists, so there is nothing to backtest
    against. Six principled, well-reasoned improvements have now measured to nothing or worse —
    including one enforcing a constraint that was arithmetically TRUE — and an unvalidatable NLP
@@ -392,14 +452,44 @@ what the availability gate is WORTH. The backtest runs with no gate at all, so "
 here is conservative by an unmeasurable amount" is literally true. One season of snapshots turns
 that permanent caveat into a number, and needs no new modelling.
 
-## Blocked until the season starts (do not attempt now)
+## UNBLOCKED — the season has started (this list was the blocker, and it is gone)
 
-- Top-10k effective ownership (`fpl ownership`) — needs completed gameweeks.
-- `fpl myteam` — needs the user's FPL entry id, still not supplied.
-- Snapshot accumulation — the scheduled task fires before the GW1 deadline.
+All three cleared on 2026-08-24. Recorded here rather than deleted, because two of them were
+blocked for a *different reason* than this file claimed.
 
-**Set-piece order is NOT blocked and was never blocked** — this list said it was, wrongly,
-until 2026-08-14. The FPL API publishes `penalties_order`, `direct_freekicks_order` and
+- **`fpl ownership --gw 1` is runnable now.** The gate is the DEADLINE, not completion:
+  `entry/{id}/event/1/picks/` stops 404-ing once it passes, and picks froze at that moment, so
+  a mid-flight gameweek is irrelevant. League 314 is populated. Two things to know before
+  running it. First the cost: `top_n_managers: 10000` at `request_delay_seconds: 0.5` is ~10,000
+  `entry/history` calls plus 1,000 picks calls, so 1.5-2 hours of polite requests. Second, and
+  more important, **nothing consumes the output** — `ingest_ownership` is called only from the
+  CLI, writes `interim/ownership`, and no other module reads it; `min_gw_for_top10k` in
+  `config.py` is defined and never referenced. So this buys a MEASUREMENT, not a pipeline
+  improvement. That measurement is worth having: it is an independent check on the simulated
+  field anchor, which is known to be inflated 1.5-2.1% by the blank-gameweek identity error
+  (see "the ownership identity is not exact in blank gameweeks" above). Not yet run.
+- **`fpl myteam` works. The entry id is 3468852** ("beanchodeFC"). Everything else comes from
+  public endpoints; there are no FPL credentials and none are wanted.
+- **Snapshots: nothing to fix, and the shelved note over-stated the problem.** `snapshot_due`
+  takes `target = min(passed)` and only skips when a held snapshot is already INSIDE that
+  checkpoint, so a capture missed at 01:30 is taken at the next hourly run the machine is awake
+  for — at 40h out rather than 48h. **The ladder self-heals.** Only the 2h and 0.5h captures are
+  genuinely unrecoverable, since after the deadline `snapshot_due` returns early. For GW2 the 6h
+  checkpoint falls at 19:30 local on a Friday, which is waking hours. The scheduled task is
+  healthy (hourly, `LastTaskResult: 0`). No reconfiguration needed; the earlier "the captures
+  closest to each deadline will often be missed" is true only of the last two rungs.
+
+### `fpl myteam` has a prerequisite that is not a flag
+
+It reads the target gameweek through the strict `PointInTime.for_gameweek`, not `for_planning`,
+so it needs a pre-deadline snapshot for the gameweek being planned or it raises
+`MissingSnapshotError`. **Run `fpl snapshot` before the deadline; do not loosen the accessor.**
+Arguably it should use `for_planning` — planning the upcoming week from today's state is not a
+lookahead violation, because a later snapshot cannot exist yet — but taking the capture
+sidesteps the question and does not weaken a guard that exists to prevent one specific bug.
+
+**Set-piece order is NOT blocked and was never blocked** — this section listed it as blocked,
+wrongly, until 2026-08-14. The FPL API publishes `penalties_order`, `direct_freekicks_order` and
 `corners_and_indirect_freekicks_order`; ingestion has always captured them; and
 `pipeline.py` has always fed `penalty_share` into the allocator. 55 players carry a live
 penalty share right now. What is blocked is only the BACKTEST, because the archive has no

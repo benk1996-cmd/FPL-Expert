@@ -15,11 +15,13 @@ only when a button is pressed, cached on the entry id, and importing `fpl_expert
 lazily inside the call. Every other tab still reads the bundle and this file still imports
 nothing heavy at module scope, so a deployment without lightgbm, pulp or the archive serves
 the whole app and fails only inside that one tab, with an explanation.
+
+That tab reports on ONE entry, `ENTRY`, and offers no way to ask about another. It is not a
+lookup tool for other people's teams.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from datetime import UTC, datetime
@@ -37,33 +39,12 @@ BUNDLE = Path(
 )
 POSITION_ORDER = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
 
-# Where the remembered entry id lives. NOT under data/serving/ — that directory is versioned
-# and deployed, and an entry id is personal (see `test_the_bundle_carries_no_personal_data`).
-# Gitignored, overridable so tests never touch the developer's real one.
-ENTRY_CACHE = Path(
-    os.environ.get("FPL_ENTRY_CACHE", Path(__file__).parent / ".fpl_entry.json")
-)
-
-
-def remembered_entry() -> int | None:
-    """The last entry id analysed, or None. A missing or damaged file is simply 'none yet'."""
-    try:
-        return int(json.loads(ENTRY_CACHE.read_text(encoding="utf-8"))["entry"])
-    except (FileNotFoundError, ValueError, KeyError, TypeError, OSError):
-        return None
-
-
-def remember_entry(entry: int) -> None:
-    """Persist the entry id so it survives a restart, not just a rerun.
-
-    Deliberately a file rather than `st.session_state`: 'cache it until it is overridden'
-    means the next session too, and session state dies with the browser tab. Failure to write
-    is not worth interrupting the analysis for — the id is a convenience, not the result.
-    """
-    try:
-        ENTRY_CACHE.write_text(json.dumps({"entry": int(entry)}), encoding="utf-8")
-    except OSError as exc:                      # read-only deployment, full disk
-        st.caption(f"Could not remember this entry id: {exc}")
+# The one entry this app reports on. Previously a text box that accepted any id, with the last
+# one remembered on disk; both are gone. A single owner needs no picker, and an arbitrary-entry
+# box on a public deployment invites looking up other people's squads through a page that
+# carries this project's recommendations — which would read as advice about them.
+# Env-overridable so a different owner can run the same app without editing it.
+ENTRY = int(os.environ.get("FPL_ENTRY", "3468852"))
 
 st.set_page_config(page_title="FPL Expert", page_icon="⚽", layout="wide")
 
@@ -403,32 +384,18 @@ with myteam_tab:
         )
         st.code("fpl myteam --entry 1234567 --brief myteam.md", language="bash")
     else:
-        saved = remembered_entry()
-        controls = st.columns([2, 1, 2])
-        typed = controls[0].text_input(
-            "FPL entry id",
-            value=str(saved) if saved else "",
-            help="The number in your team URL: fantasy.premierleague.com/entry/**1234567**/event/1",
-            placeholder="1234567",
-        )
-        run = controls[1].button("Analyse", type="primary", use_container_width=True)
-        if saved:
-            controls[2].caption(f"Remembered entry **{saved}**. Type a different id to replace it.")
-
-        if run:
-            cleaned = typed.strip().lstrip("#")
-            if not cleaned.isdigit():
-                st.error("An entry id is a plain number — copy it out of your team URL.")
-            else:
-                st.session_state["myteam_entry"] = int(cleaned)
+        controls = st.columns([1, 4])
+        if controls[0].button("Analyse", type="primary", use_container_width=True):
+            st.session_state["myteam_entry"] = ENTRY
+        controls[1].caption(f"Entry **{ENTRY}**.")
 
         active = st.session_state.get("myteam_entry")
         if active is None:
-            st.info("Enter your entry id and press Analyse.")
+            st.info(f"Press Analyse to work out this week's move for entry {ENTRY}.")
             st.caption(
-                "This is the one tab that runs the model rather than reading the published "
-                "bundle, because advice about a squad you own cannot be precomputed for "
-                "everyone. Expect roughly 20 seconds the first time; the result is then cached."
+                "Behind a button because this is the one tab that runs the model rather than "
+                "reading the published bundle — advice about a squad you own cannot be "
+                "precomputed. Expect roughly 20 seconds the first time; then it is cached."
             )
         else:
             try:
@@ -457,13 +424,14 @@ with myteam_tab:
                         "it passes, that state is unrecoverable."
                     )
                 elif "not found" in message.lower():
-                    st.error(f"No such entry: {active}. Check the number in your team URL.")
+                    st.error(
+                        f"The FPL API has no entry {active}. Set FPL_ENTRY if this app has "
+                        "changed hands."
+                    )
                 else:
                     st.error(f"Could not analyse entry {active}.")
                     st.exception(exc)
             else:
-                remember_entry(active)
-
                 head = st.columns(5)
                 head[0].metric("Team", me["team_name"])
                 head[1].metric("Gameweek", me["gameweek"])

@@ -97,16 +97,10 @@ def single_gw_bundle(tmp_path):
 
 
 def _run(bundle_dir, monkeypatch):
-    """Point the app at a test bundle by patching the module-level BUNDLE path.
-
-    `FPL_ENTRY_CACHE` is redirected for the same reason the bundle is: the My Team tab
-    remembers an entry id on disk, and a test must neither read the developer's real one nor
-    overwrite it.
-    """
+    """Point the app at a test bundle by patching the module-level BUNDLE path."""
     app = AppTest.from_file(str(APP), default_timeout=60)
     app.session_state["_test_bundle"] = str(bundle_dir)
     monkeypatch.setenv("FPL_SERVING_DIR", str(bundle_dir))
-    monkeypatch.setenv("FPL_ENTRY_CACHE", str(Path(bundle_dir) / "entry.json"))
     return app.run()
 
 
@@ -288,38 +282,33 @@ def test_my_team_prompts_rather_than_running_the_model_on_load(bundle, monkeypat
     pass whether or not the guard existed.
 
     The tab must therefore be sitting at its prompt, with no analysis rendered. A run on load
-    would also have to reach the network without an entry id, which `test_the_app_runs_
-    without_exceptions` would catch.
+    would also have to reach the network, which `test_the_app_runs_without_exceptions` catches.
     """
     app = _run(bundle, monkeypatch)
     text = " ".join(str(i.value) for i in app.info) + " ".join(
         str(c.value) for c in app.caption
     )
 
-    assert "entry id" in text.lower()
+    assert "Analyse" in text
     assert not app.exception
     assert "myteam_entry" not in app.session_state      # nothing was queued for analysis
 
 
-def test_the_entry_id_is_remembered_across_restarts(bundle, monkeypatch, tmp_path):
-    """'Cache it until overridden' has to mean the next session too, not just the next rerun.
+def test_my_team_offers_no_way_to_ask_about_another_entry(bundle, monkeypatch):
+    """The tab reports on one entry and is not a lookup tool for other people's squads.
 
-    Session state dies with the browser tab, so the id is persisted to a gitignored file.
+    It used to take any id in a text box, remembered on disk. On a public deployment that
+    invites pulling up a stranger's team inside a page carrying this project's recommendations,
+    which reads as advice about them. Both the box and the cache were removed; this is the test
+    that stops either coming back by accident.
     """
-    import importlib
-
-    cache = tmp_path / "entry.json"
-    monkeypatch.setenv("FPL_ENTRY_CACHE", str(cache))
     import app as app_module
 
-    importlib.reload(app_module)
+    app = _run(bundle, monkeypatch)
 
-    assert app_module.remembered_entry() is None       # nothing remembered yet
-    app_module.remember_entry(3468852)
-    assert app_module.remembered_entry() == 3468852
-
-    cache.write_text("not json at all", encoding="utf-8")
-    assert app_module.remembered_entry() is None       # damaged file reads as 'none yet'
+    assert not app.text_input                          # no box to type another id into
+    assert not hasattr(app_module, "remembered_entry")  # and nothing remembering one
+    assert app_module.ENTRY == 3468852
 
 
 def test_the_bundle_carries_no_personal_data(bundle):
