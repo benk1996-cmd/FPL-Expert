@@ -44,12 +44,39 @@ PLAYER_COLUMNS = [
 ]
 
 
+# The per-gameweek quantities. Identity, price and squad membership stay in `players.parquet`
+# because they do not vary across the horizon — repeating them once per gameweek would multiply
+# the bundle for nothing. `horizon_points` is deliberately absent: it is a single valuation made
+# as of the published gameweek, not a series, and showing it per week would imply otherwise.
+FORECAST_COLUMNS = [
+    "player_id", "expected_points", "p_appear", "p_long", "expected_minutes",
+    "pts_appearance", "pts_goals", "pts_assists", "pts_clean_sheet",
+    "pts_bonus", "pts_defcon", "pts_saves", "pts_cards",
+    "expected_goals", "expected_assists",
+]
+
+
 def _present(frame: pd.DataFrame, columns: list[str]) -> list[str]:
     """Intersect, loudly. A silently missing column here becomes a missing UI section."""
     missing = [c for c in columns if c not in frame.columns]
     if missing:
         log.info("serving bundle omits absent columns: %s", missing)
     return [c for c in columns if c in frame.columns]
+
+
+def forecast_series(by_gameweek: dict) -> pd.DataFrame:
+    """Stack per-gameweek forecasts long, so a front end can step through the horizon.
+
+    These frames are a by-product the pipeline already builds — the horizon valuation is the
+    weighted sum of them — and were thrown away once summed. Serving them is what lets the app
+    show next week's forecast without running a model.
+    """
+    blocks = []
+    for gw, frame in sorted(by_gameweek.items()):
+        block = frame[_present(frame, FORECAST_COLUMNS)].copy()
+        block.insert(1, "gw", int(gw))
+        blocks.append(block)
+    return pd.concat(blocks, ignore_index=True) if blocks else pd.DataFrame()
 
 
 def fixture_grid(fixtures: pd.DataFrame, teams: pd.Series, gw: int, span: int) -> pd.DataFrame:
@@ -125,6 +152,7 @@ def write_bundle(
     risers: pd.DataFrame | None = None,
     fallers: pd.DataFrame | None = None,
     points_col: str = "horizon_points",
+    by_gameweek: dict | None = None,
 ) -> Path:
     """Write everything a front end needs, and a manifest saying what it is.
 
@@ -147,6 +175,11 @@ def write_bundle(
     if fixtures is not None and not fixtures.empty:
         fixtures.to_parquet(out / "fixtures.parquet", index=False)
 
+    series = forecast_series(by_gameweek or {})
+    served_gws = sorted(series["gw"].unique().tolist()) if not series.empty else [int(gw)]
+    if not series.empty:
+        series.to_parquet(out / "forecasts.parquet", index=False)
+
     moves = []
     for label, frame in (("rise", risers), ("fall", fallers)):
         if frame is not None and not frame.empty:
@@ -163,6 +196,10 @@ def write_bundle(
 
     manifest = {
         "gameweek": int(gw),
+        # Which gameweeks `forecasts.parquet` can actually serve. Not simply gw..gw+span-1:
+        # `_horizon_frame` truncates the horizon when a future week cannot be forecast, and a
+        # navigator built on the nominal span would offer weeks that hold nothing.
+        "gameweeks": [int(g) for g in served_gws],
         "horizon": int(span),
         "points_col": points_col,
         "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -196,7 +233,7 @@ def read_bundle(directory: Path | str) -> dict:
         "brief": (out / "brief.md").read_text(encoding="utf-8")
         if (out / "brief.md").exists() else "",
     }
-    for name in ("fixtures", "prices"):
+    for name in ("fixtures", "prices", "forecasts"):
         path = out / f"{name}.parquet"
         bundle[name] = pd.read_parquet(path) if path.exists() else None
     return bundle

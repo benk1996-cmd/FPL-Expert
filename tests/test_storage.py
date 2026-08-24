@@ -31,6 +31,32 @@ def test_raw_roundtrip_preserves_unicode(tmp_config):
     assert read_raw("fpl_api", "bootstrap")["name"] == "Højlund"
 
 
+def test_raw_roundtrip_serialises_timestamps(tmp_config):
+    """`odds.normalise` parses its date column, so records carry `pd.Timestamp` objects.
+
+    Until 2026-08-24 this raised, and because the odds capture swallows its exception the
+    snapshot was reported as clean with zero rows. It only surfaced once bookmakers began
+    pricing fixtures — every earlier snapshot had an empty feed and nothing to serialise.
+    """
+    records = [{"home_team": "Arsenal", "date": pd.Timestamp("2026-08-21")}]
+    write_raw(records, "snapshot", "odds", stamp="20260824T130000Z")
+
+    assert read_raw("snapshot", "odds")[0]["date"] == "2026-08-21T00:00:00"
+
+
+def test_write_raw_leaves_no_file_when_serialisation_fails(tmp_config):
+    """A partial dump is worse than none — later reads choke on truncated JSON.
+
+    The failing write used to stream into the open gzip handle, leaving 66 bytes ending
+    mid-field on disk. Nothing downstream can tell that from a real capture until it parses.
+    """
+    with pytest.raises(TypeError):
+        write_raw([{"conn": object()}], "snapshot", "odds", stamp="20260824T140000Z")
+
+    with pytest.raises(FileNotFoundError):
+        read_raw("snapshot", "odds")
+
+
 def test_read_raw_respects_as_of_stamp(tmp_config):
     """The point-in-time guarantee: reading 'as of' a stamp must not see later snapshots.
 

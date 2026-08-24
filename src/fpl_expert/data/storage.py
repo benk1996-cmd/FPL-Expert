@@ -10,7 +10,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,14 +28,32 @@ def utc_stamp(when: datetime | None = None) -> str:
     return (when or datetime.now(UTC)).strftime(TS_FORMAT)
 
 
+def _json_default(value: Any) -> str:
+    """Encode the types our feeds carry that JSON does not cover natively.
+
+    Only datetimes, in practice: `normalise` in `odds.py` parses its date column, so
+    `to_dict("records")` hands us `pd.Timestamp` objects. Deliberately narrow rather than
+    `default=str` — an unexpected type should still raise here, where it is one truncated
+    field away from being written into the evidence trail as a plausible-looking string.
+    """
+    if isinstance(value, pd.Timestamp | datetime | date):
+        return value.isoformat()
+    raise TypeError(f"cannot serialise {type(value).__name__} into a raw dump")
+
+
 def write_raw(payload: Any, source: str, name: str, *, stamp: str | None = None) -> Path:
     """Write an immutable, gzipped JSON dump to `raw/{source}/{name}/pulled_at=.../data.json.gz`."""
     stamp = stamp or utc_stamp()
     out = load_config().path("raw") / source / name / f"pulled_at={stamp}"
+    # Serialise fully BEFORE touching the filesystem. Streaming into the gzip handle meant an
+    # unserialisable value part-way through left a truncated dump on disk that every later
+    # read would choke on — and the odds capture swallows its exception, so the corruption
+    # was reported as a clean snapshot holding zero rows.
+    encoded = json.dumps(payload, ensure_ascii=False, default=_json_default)
     out.mkdir(parents=True, exist_ok=True)
     path = out / "data.json.gz"
     with gzip.open(path, "wt", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
+        fh.write(encoded)
     return path
 
 

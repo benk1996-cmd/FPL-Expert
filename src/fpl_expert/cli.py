@@ -219,7 +219,12 @@ def match(
 
 def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True,
                    balance_minutes: bool = False):
-    """This gameweek's forecasts, with a forward valuation attached. Returns (frame, column).
+    """Forecasts with a forward valuation attached. Returns (frame, column, by_gameweek).
+
+    `by_gameweek` maps each gameweek in the horizon to its own forecast frame. Those frames
+    have always been computed here — the horizon valuation is built from them — and were
+    previously discarded once summed. `publish` now serves them, which is what lets the front
+    end step forward a week without running anything.
 
     Shared by `squad`, `report` and `myteam` so the three cannot drift apart on how a player
     is valued — they did, and it is why `report` was recommending a different fifteen from
@@ -239,7 +244,7 @@ def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True,
         forecast_gameweek(gw, balance_minutes=balance_minutes)
     )
     if span <= 1:
-        return per_player, "expected_points"
+        return per_player, "expected_points", {gw: per_player}
 
     if echo:
         typer.echo(f"valuing over GW{gw}-{gw + span - 1} (horizon {span})")
@@ -259,16 +264,19 @@ def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True,
     # Fall back to the single gameweek, never to zero: a player missing from the forward
     # frames is unvalued, not worthless, and zero would make him unsellable and unbuyable.
     frame["horizon_points"] = frame["horizon_points"].fillna(frame["expected_points"])
-    return frame, "horizon_points"
+    return frame, "horizon_points", by_gw
 
 
-def _brief(path, latest, solution, gw, span, rules, plan=None, held=None) -> None:
-    """Write the weekly decision brief. One implementation, two entry points.
+def _brief(path, latest, solution, gw, span, rules, plan=None, held=None) -> str:
+    """Build the weekly decision brief, writing it only when given somewhere to write.
 
     `report` solves an ideal squad from scratch and has no transfer plan to show; `myteam`
     starts from the squad you own and does. Everything else — chip values, price movers, the
     caveats — is common, and was previously present in `myteam` and silently missing from
     `report`, which passed none of `build_report`'s optional arguments.
+
+    `path=None` renders without touching the filesystem, which is what the Streamlit view
+    needs: the brief for a real entry is personal, and `data/serving/` is committed.
     """
     from pathlib import Path
 
@@ -295,8 +303,9 @@ def _brief(path, latest, solution, gw, span, rules, plan=None, held=None) -> Non
         latest, solution, gw, plan=plan, chip_values=values,
         risers=risers, fallers=fallers,
     )
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(markdown, encoding="utf-8")
+    if path is not None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(markdown, encoding="utf-8")
     return markdown
 
 
@@ -340,7 +349,7 @@ def squad(
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
 
     write_table(forecast_gameweek(gw), "processed", "player_forecasts", gw=gw)
-    per_player, points_col = _horizon_frame(gw, span, cfg.optimise.future_decay)
+    per_player, points_col, _ = _horizon_frame(gw, span, cfg.optimise.future_decay)
 
     solution = select_squad(
         per_player,
@@ -793,7 +802,7 @@ def report(
     cfg, rules = load_config(), load_scoring_rules()
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
 
-    latest, points_col = _horizon_frame(gw, span, cfg.optimise.future_decay)
+    latest, points_col, _ = _horizon_frame(gw, span, cfg.optimise.future_decay)
     solution = select_squad(
         latest,
         budget=rules["squad"]["budget"],
@@ -840,7 +849,7 @@ def publish(
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
     directory = Path(out) if out else project_root() / "data" / "serving"
 
-    latest, points_col = _horizon_frame(gw, span, cfg.optimise.future_decay)
+    latest, points_col, by_gw = _horizon_frame(gw, span, cfg.optimise.future_decay)
     solution = select_squad(
         latest,
         budget=rules["squad"]["budget"],
@@ -875,6 +884,7 @@ def publish(
     write_bundle(
         directory, gw=gw, span=span, players=latest, solution=solution, brief=brief,
         fixtures=grid, risers=risers, fallers=fallers, points_col=points_col,
+        by_gameweek=by_gw,
     )
     typer.echo(f"\nbundle -> {directory}")
     typer.echo(solution.summary())
@@ -936,46 +946,18 @@ def myteam(
     _setup_logging(verbose)
     import warnings
 
-    from .config import load_config, load_scoring_rules
-    from .data.fpl_api import FplApi, next_gameweek
-    from .data.my_team import bank, current_squad, fetch_entry, free_transfers
-    from .data.snapshot import PointInTime
-    from .models.points import aggregate_gameweek
-    from .optimise.transfers import horizon_points, recommend_transfers
-    from .pipeline import forecast_gameweek
+    from .advice import analyse_entry
+    from .config import load_scoring_rules
 
     warnings.filterwarnings("ignore")
-    cfg, rules = load_config(), load_scoring_rules()
-    api = FplApi()
-    target = gw if gw is not None else next_gameweek(api.bootstrap_static())
-    span = horizon if horizon is not None else cfg.optimise.horizon_gws
+    rules = load_scoring_rules()
 
-    profile = fetch_entry(api, entry)
-    typer.echo(f"{profile.get('name', '?')} — GW{target}, planning over {span} gameweek(s)")
-
-    players = PointInTime.for_gameweek(target).players()
-    squad = current_squad(api, entry, target, players)
-    available = free_transfers(api, entry, target, rules["transfers"]["max_banked"])
-    in_bank = bank(profile)
-    typer.echo(f"squad of {len(squad)}, £{in_bank:.1f}m banked, {available} free transfer(s)")
-
-    # Future gameweeks are PLANNING, not evaluation: no pre-deadline snapshot exists for
-    # them yet, so the horizon is built from the latest known state.
-    per_gw = {
-        g: aggregate_gameweek(forecast_gameweek(g, planning=g != target))
-        for g in range(target, target + span)
-    }
-    horizon_table = horizon_points(per_gw, decay=cfg.optimise.future_decay)
-
-    latest = per_gw[target].merge(horizon_table, on="player_id", how="left")
-    latest["horizon_points"] = latest["horizon_points"].fillna(0.0)
-    held = latest[latest["player_id"].isin(squad["id"])].merge(
-        squad[["id", "selling_price"]].rename(columns={"id": "player_id"}), on="player_id"
-    )
-
-    plan = recommend_transfers(
-        held, latest, bank=in_bank, free_transfers=available,
-        max_per_club=rules["squad"]["max_per_club"], max_transfers=max_transfers,
+    result = analyse_entry(entry, gw=gw, span=horizon, max_transfers=max_transfers)
+    target, span, plan = result.gameweek, result.span, result.plan
+    typer.echo(f"{result.team_name} — GW{target}, planning over {span} gameweek(s)")
+    typer.echo(
+        f"squad of {len(result.squad)}, £{result.bank:.1f}m banked, "
+        f"{result.free_transfers} free transfer(s)"
     )
     typer.echo("\n" + plan.summary())
     if plan.n_transfers:
@@ -988,7 +970,8 @@ def myteam(
         typer.echo(plan.transfers_in[show].round(2).to_string(index=False))
 
     if brief:
-        _write_myteam_brief(brief, latest, held, squad, plan, target, span, rules)
+        myteam_brief(result, rules, path=brief)
+        typer.echo(f"\nbrief written -> {brief}")
 
 
 def _price_moves(latest, held):
@@ -1031,7 +1014,7 @@ def _price_moves(latest, held):
     return risers, fallers
 
 
-def _write_myteam_brief(path, latest, held, squad, plan, gw, span, rules) -> None:
+def myteam_brief(result, rules, *, path=None) -> str:
     """The weekly brief for a squad you actually own — transfers, chips and prices together.
 
     Differs from `report` in exactly one respect: the squad is the one you hold rather than
@@ -1039,12 +1022,17 @@ def _write_myteam_brief(path, latest, held, squad, plan, gw, span, rules) -> Non
     `_brief`, shared with `report`, because the two drifted apart once already — `report`
     passed none of `build_report`'s optional arguments and silently rendered no chip or
     price section at all.
+
+    Takes an `EntryAdvice` and returns the markdown, writing it only if given a path. The
+    Streamlit view renders the string and never writes, because this content is personal and
+    `data/serving/` is committed and deployed.
     """
     import pandas as pd
 
     from .backtest.season_sim import pick_xi
     from .optimise.squad import SquadSolution
 
+    held, plan = result.held, result.plan
     ranked, starters = pick_xi(held, rules, "expected_points")
     bench = ranked.drop(index=starters.index)
     captain = starters.nlargest(1, "expected_points")
@@ -1061,8 +1049,10 @@ def _write_myteam_brief(path, latest, held, squad, plan, gw, span, rules) -> Non
         status="held squad",
     )
 
-    _brief(path, latest, solution, gw, span, rules, plan=plan, held=held)
-    typer.echo(f"\nbrief written -> {path}")
+    return _brief(
+        path, result.latest, solution, result.gameweek, result.span, rules,
+        plan=plan, held=held,
+    )
 
 
 @app.command()

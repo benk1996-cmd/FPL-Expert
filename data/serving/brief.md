@@ -1,48 +1,56 @@
-# Gameweek 1 brief
+# Gameweek 2 brief
 
-**Squad cost** £100.0m  ·  **expected points** 48.2  ·  **captain** B.Fernandes (vice Szoboszlai)
+**Squad cost** £100.0m  ·  **expected points** 54.3  ·  **captain** B.Fernandes (vice Haaland)
 
 ## Starting XI
 ```
    web_name position        team  price  expected_points
-   Pickford       GK     Everton    5.5             3.20
-  Tarkowski      DEF     Everton    6.0             3.72
-     Virgil      DEF   Liverpool    6.5             3.31
-     Senesi      DEF       Spurs    6.0             3.13
-B.Fernandes      MID     Man Utd   12.0             5.28
-   Anderson      MID    Man City    6.5             4.13
- Szoboszlai      MID   Liverpool    7.0             4.11
-     Mbeumo      MID     Man Utd    8.0             3.83
-      Gakpo      MID   Liverpool    7.0             3.63
-     Thiago      FWD   Brentford    8.0             4.43
-    Watkins      FWD Aston Villa    8.0             4.11
+       Leno       GK      Fulham    4.5             2.95
+     Virgil      DEF   Liverpool    6.5             4.00
+   Truffert      DEF Bournemouth    5.5             3.90
+     Senesi      DEF       Spurs    6.0             3.62
+B.Fernandes      MID     Man Utd   12.0             7.97
+ Szoboszlai      MID   Liverpool    7.0             4.93
+  Tavernier      MID Bournemouth    6.0             3.90
+       Groß      MID    Brighton    5.5             3.57
+     Ndiaye      MID     Everton    6.0             3.35
+    Haaland      FWD    Man City   15.5             4.46
+    Watkins      FWD Aston Villa    8.0             3.71
 ```
 
 ## Bench
 ```
-  web_name position      team  price  expected_points
-     Osula      FWD Newcastle    6.0             3.30
-      Leno       GK    Fulham    4.5             2.88
-  Robinson      DEF    Fulham    4.5             2.84
-F.Kadıoğlu      DEF  Brighton    4.5             2.90
+  web_name position         team  price  expected_points
+    Justin      DEF        Leeds    4.5             3.02
+Verbruggen       GK     Brighton    4.5             2.56
+    O'Shea      DEF Ipswich Town    4.0             1.02
+     Neave      FWD    Newcastle    4.5             0.52
 ```
 
 ## Captaincy
 `cost_vs_best` is what you give up by overriding the recommendation.
 ```
    web_name        team  expected_points  captain_points  cost_vs_best
-B.Fernandes     Man Utd             5.28           10.55          0.00
-     Thiago   Brentford             4.43            8.86          1.69
-   Anderson    Man City             4.13            8.27          2.29
- Szoboszlai   Liverpool             4.11            8.22          2.33
-    Watkins Aston Villa             4.11            8.21          2.34
+B.Fernandes     Man Utd             7.97           15.95          0.00
+ Szoboszlai   Liverpool             4.93            9.87          6.08
+    Haaland    Man City             4.46            8.91          7.04
+     Virgil   Liverpool             4.00            8.00          7.95
+   Truffert Bournemouth             3.90            7.80          8.15
 ```
 
 ## Chips
 **Hold.** Nothing this week beats what the remaining windows offer.
 ```
-bench boost        11.9
-triple captain      5.3
+bench boost         7.1
+triple captain      8.0
+```
+
+## Availability risk
+Squad members the minutes model rates below 70% to appear.
+```
+web_name position      team  p_appear  expected_minutes
+   Neave      FWD Newcastle      0.27              8.23
+ Haaland      FWD  Man City      0.69             51.91
 ```
 
 ## Caveats

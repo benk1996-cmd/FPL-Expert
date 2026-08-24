@@ -73,13 +73,18 @@ def recommend_transfers(
     Points should be summed over the planning horizon, not a single gameweek — a transfer
     is a durable change, so judging it on one week systematically over-trades.
 
-    **The hit threshold has not been re-derived since the horizon was made point-in-time
-    (2026-08-12), and the evidence says it should be.** Against a myopic policy the horizon
-    now pays 72 / 96 / 76 more points in hits every season — a reliable cost — for extra
-    transfer value of +280 / -4 / +77, which is not reliable at all. In 2024-25 it made 24
-    more transfers whose realised six-week return was identical to the myopic policy's, for
-    96 points of hits. `hit_cost` was implicitly calibrated against a forward valuation that
-    barely moved between gameweeks, and honest forecasts move. See DECISIONS.
+    **The hit threshold was re-derived after the point-in-time fix, and raising it is
+    rejected.** This docstring previously called for that work; it has since been done
+    (2026-08-13) and the answer was no. The motivating bias is real and about as stable as
+    anything in this project — the forecast margin behind a transfer is overstated ~2.3x,
+    slope 0.436 in every season — but the implied bar of ~9 measures **-38 / -42 / +45**
+    across the three seasons, and every `hit_bar` variant swept (6, 8, 9, 10, 12) flips sign
+    between seasons on 10 perturbed decision paths each. None is adoptable.
+
+    So `hit_cost` stays at the nominal 4, not because it is proven but because nothing beats
+    it reliably. Do not re-open this on the strength of the 2.3x measurement alone: that is
+    ground rule 3, and the hit bar is the fifth principled bias fix to measure to nothing.
+    See DECISIONS, "Decision-layer parameter sweep (2026-08-13)".
     """
     squad = squad.reset_index(drop=True)
     pool = candidates[~candidates["player_id"].isin(squad["player_id"])].reset_index(drop=True)

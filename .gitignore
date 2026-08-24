@@ -16,6 +16,13 @@ data/raw/.cache/
 # Uncomment to version the point-in-time snapshots alongside the code:
 # !data/raw/
 
+# Anything about a REAL entry is personal and must never reach the versioned bundle: the
+# remembered entry id from the app's My Team tab, and any brief written for a squad someone
+# owns. `data/serving/` is committed, so a stray `--brief data/serving/x.md` would publish
+# someone's squad — hence the second line.
+.fpl_entry.json
+data/serving/myteam_*.md
+
 .venv/
 __pycache__/
 *.py[cod]

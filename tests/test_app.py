@@ -53,6 +53,15 @@ def _players(n=40):
     return pd.DataFrame(rows)
 
 
+def _by_gameweek(players, gws=(1, 2, 3)):
+    """Per-gameweek forecasts, deliberately differing week to week so a navigator can be seen
+    to actually change what is on screen."""
+    return {
+        gw: players.assign(expected_points=players["expected_points"] + gw)
+        for gw in gws
+    }
+
+
 @pytest.fixture
 def bundle(tmp_path):
     from fpl_expert.serving import write_bundle
@@ -68,15 +77,36 @@ def bundle(tmp_path):
     write_bundle(
         tmp_path, gw=1, span=6, players=players, solution=solution,
         brief="# Brief\n\nSomething useful.", fixtures=fixtures,
+        by_gameweek=_by_gameweek(players),
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def single_gw_bundle(tmp_path):
+    """A bundle published before `forecasts.parquet` existed — no navigator, no crash."""
+    from fpl_expert.serving import write_bundle
+
+    players = _players()
+    squad = players.head(15)
+    write_bundle(
+        tmp_path, gw=1, span=6, players=players, solution=_Solution(squad, squad.head(11)),
+        brief="# Brief",
     )
     return tmp_path
 
 
 def _run(bundle_dir, monkeypatch):
-    """Point the app at a test bundle by patching the module-level BUNDLE path."""
+    """Point the app at a test bundle by patching the module-level BUNDLE path.
+
+    `FPL_ENTRY_CACHE` is redirected for the same reason the bundle is: the My Team tab
+    remembers an entry id on disk, and a test must neither read the developer's real one nor
+    overwrite it.
+    """
     app = AppTest.from_file(str(APP), default_timeout=60)
     app.session_state["_test_bundle"] = str(bundle_dir)
     monkeypatch.setenv("FPL_SERVING_DIR", str(bundle_dir))
+    monkeypatch.setenv("FPL_ENTRY_CACHE", str(Path(bundle_dir) / "entry.json"))
     return app.run()
 
 
@@ -98,7 +128,7 @@ def test_the_headline_numbers_are_rendered(bundle, monkeypatch):
 def test_every_tab_is_present(bundle, monkeypatch):
     app = _run(bundle, monkeypatch)
     rendered = " ".join(str(t) for t in app.tabs) if app.tabs else ""
-    for name in ("Squad", "Players", "Fixtures", "Brief"):
+    for name in ("Squad", "Players", "Fixtures", "Brief", "My Team"):
         assert name in rendered or any(name in str(m.value) for m in app.markdown)
 
 
@@ -157,6 +187,110 @@ def test_a_single_variant_bundle_shows_no_switch(bundle, monkeypatch):
     app = _run(bundle, monkeypatch)
     assert not app.exception
     assert not app.radio
+
+
+def _arrow(app, glyph):
+    """The navigator buttons by label — position would break the moment a tab adds one."""
+    return next(b for b in app.button if b.label == glyph)
+
+
+def test_the_gameweek_navigator_steps_forward_and_back(bundle, monkeypatch):
+    """The arrows must change the forecasts on screen, not just the label.
+
+    The fixture makes each gameweek's expected points differ by a known amount, so a
+    navigator that moved the caption while still rendering week one would fail here.
+    """
+    app = _run(bundle, monkeypatch)
+    published = next(m for m in app.metric if m.label == "Gameweek")
+    start = float(next(m for m in app.metric if m.label == "Expected points").value)
+    assert published.value == "1"
+
+    _arrow(app, "▶").click().run()
+    assert next(m for m in app.metric if m.label == "Gameweek").value == "2"
+    stepped = float(next(m for m in app.metric if m.label == "Expected points").value)
+    assert stepped > start                            # GW2 adds +1 per player in the fixture
+
+    _arrow(app, "◀").click().run()
+    assert next(m for m in app.metric if m.label == "Gameweek").value == "1"
+    assert float(
+        next(m for m in app.metric if m.label == "Expected points").value
+    ) == pytest.approx(start)
+
+
+def test_the_navigator_stops_at_both_ends(bundle, monkeypatch):
+    """Nothing outside the published window can be reached — there are no forecasts there."""
+    app = _run(bundle, monkeypatch)
+
+    assert _arrow(app, "◀").disabled                  # already at the first gameweek
+    assert not _arrow(app, "▶").disabled
+
+    _arrow(app, "▶").click().run()
+    _arrow(app, "▶").click().run()                    # now at the last served gameweek
+
+    assert app.session_state["view_gw"] == 3
+    assert _arrow(app, "▶").disabled
+
+
+def test_stepping_forward_says_the_squad_is_still_the_published_one(bundle, monkeypatch):
+    """The fifteen were solved once, on the whole horizon. Showing next week's forecasts over
+    the same squad must not read as 'this is what to pick next week'."""
+    app = _run(bundle, monkeypatch)
+    _arrow(app, "▶").click().run()
+
+    warned = " ".join(str(w.value) for w in app.warning)
+    assert "GW1 decision" in warned or "chosen once" in warned
+
+
+def test_a_bundle_without_forecasts_shows_no_navigator(single_gw_bundle, monkeypatch):
+    """Old bundles predate `forecasts.parquet`. They must still render, minus the arrows."""
+    app = _run(single_gw_bundle, monkeypatch)
+
+    assert not app.exception
+    assert next(m for m in app.metric if m.label == "Gameweek").value == "1"
+    assert not [b for b in app.button if b.label in ("◀", "▶")]
+
+
+def test_my_team_prompts_rather_than_running_the_model_on_load(bundle, monkeypatch):
+    """The expensive guarantee: opening the page must not fire a 20-second pipeline run.
+
+    Every other tab reads the bundle; this one forecasts the whole horizon. Asserted through
+    behaviour rather than by patching `analyse`, because `AppTest` execs the script into its
+    own namespace and a patch on the imported module would never reach it — the test would
+    pass whether or not the guard existed.
+
+    The tab must therefore be sitting at its prompt, with no analysis rendered. A run on load
+    would also have to reach the network without an entry id, which `test_the_app_runs_
+    without_exceptions` would catch.
+    """
+    app = _run(bundle, monkeypatch)
+    text = " ".join(str(i.value) for i in app.info) + " ".join(
+        str(c.value) for c in app.caption
+    )
+
+    assert "entry id" in text.lower()
+    assert not app.exception
+    assert "myteam_entry" not in app.session_state      # nothing was queued for analysis
+
+
+def test_the_entry_id_is_remembered_across_restarts(bundle, monkeypatch, tmp_path):
+    """'Cache it until overridden' has to mean the next session too, not just the next rerun.
+
+    Session state dies with the browser tab, so the id is persisted to a gitignored file.
+    """
+    import importlib
+
+    cache = tmp_path / "entry.json"
+    monkeypatch.setenv("FPL_ENTRY_CACHE", str(cache))
+    import app as app_module
+
+    importlib.reload(app_module)
+
+    assert app_module.remembered_entry() is None       # nothing remembered yet
+    app_module.remember_entry(3468852)
+    assert app_module.remembered_entry() == 3468852
+
+    cache.write_text("not json at all", encoding="utf-8")
+    assert app_module.remembered_entry() is None       # damaged file reads as 'none yet'
 
 
 def test_the_bundle_carries_no_personal_data(bundle):
