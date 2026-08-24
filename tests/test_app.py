@@ -250,6 +250,35 @@ def test_a_bundle_without_forecasts_shows_no_navigator(single_gw_bundle, monkeyp
     assert not [b for b in app.button if b.label in ("◀", "▶")]
 
 
+def test_my_team_explains_itself_when_the_model_cannot_run_here(bundle, monkeypatch, tmp_path):
+    """The deployed app is the bundle and nothing else, so this tab cannot work there.
+
+    Reported from Streamlit Cloud as a raw `FileNotFoundError: no table at
+    data/interim/teams/season=2026-27` traceback. The packages install fine there — it is the
+    DATA that is gitignored — so an ImportError guard never fired. The tab must say so before
+    offering a button that spins for twenty seconds and then fails.
+    """
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "MODEL_INPUTS", {"the archive": "data/interim"})
+    monkeypatch.chdir(tmp_path)
+    assert app_module.missing_model_inputs() == []      # the real checkout HAS these
+
+    monkeypatch.setattr(app_module, "MODEL_INPUTS", {"the archive": "definitely/not/here"})
+    assert app_module.missing_model_inputs() == ["the archive"]
+
+
+def test_an_empty_directory_counts_as_a_missing_input(monkeypatch, tmp_path):
+    """A shallow checkout can leave the directory behind with nothing in it, and `config.path`
+    creates each layer on read — so existence alone is not evidence of data."""
+    import app as app_module
+
+    (tmp_path / "hollow").mkdir()
+    assert not app_module._populated(tmp_path / "hollow")
+    (tmp_path / "hollow" / "something.parquet").write_text("x", encoding="utf-8")
+    assert app_module._populated(tmp_path / "hollow")
+
+
 def test_my_team_prompts_rather_than_running_the_model_on_load(bundle, monkeypatch):
     """The expensive guarantee: opening the page must not fire a 20-second pipeline run.
 

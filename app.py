@@ -74,6 +74,39 @@ def load(path: str, stamp: float):
     return read_bundle(path)
 
 
+# What `forecast_gameweek` reads that the deployed app does not have. Every one of these is
+# gitignored on purpose — excluding them is what lets the bundle deploy without the archive —
+# so My Team runs from a full local checkout and nowhere else. Checked by path rather than by
+# import: on Streamlit Cloud the packages install fine and it is the DATA that is absent, which
+# is why an ImportError guard alone let a FileNotFoundError traceback reach the page.
+MODEL_INPUTS = {
+    "the current season's teams and fixtures": "data/interim",
+    "the trained minutes model": "data/processed/models/minutes.txt",
+    "historical odds for the match model": "data/external",
+    "a pre-deadline snapshot": "data/raw/snapshot",
+}
+
+
+def _populated(path: Path) -> bool:
+    """Present and non-empty. An empty directory is as useless as an absent one here."""
+    try:
+        if not path.exists():
+            return False
+        return any(path.iterdir()) if path.is_dir() else path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def missing_model_inputs() -> list[str]:
+    """Which inputs are absent here. Empty means the model can run.
+
+    Deliberately does not call `config.path()`, which creates the directory it resolves and
+    would therefore report every layer as present.
+    """
+    root = Path(__file__).parent
+    return [name for name, rel in MODEL_INPUTS.items() if not _populated(root / rel)]
+
+
 @st.cache_data(show_spinner=False, ttl=3600)
 def analyse(entry: int, gw: int | None):
     """Run the real pipeline for one entry. Cached, because it is ~20 seconds of work.
@@ -353,117 +386,138 @@ with myteam_tab:
         "but *is this specific change worth what it costs?*"
     )
 
-    saved = remembered_entry()
-    controls = st.columns([2, 1, 2])
-    typed = controls[0].text_input(
-        "FPL entry id",
-        value=str(saved) if saved else "",
-        help="The number in your team URL: fantasy.premierleague.com/entry/**1234567**/event/1",
-        placeholder="1234567",
-    )
-    run = controls[1].button("Analyse", type="primary", use_container_width=True)
-    if saved:
-        controls[2].caption(f"Remembered entry **{saved}**. Type a different id to replace it.")
-
-    if run:
-        cleaned = typed.strip().lstrip("#")
-        if not cleaned.isdigit():
-            st.error("An entry id is a plain number — copy it out of your team URL.")
-        else:
-            st.session_state["myteam_entry"] = int(cleaned)
-
-    active = st.session_state.get("myteam_entry")
-    if active is None:
-        st.info("Enter your entry id and press Analyse.")
-        st.caption(
-            "This is the one tab that runs the model rather than reading the published "
-            "bundle, because advice about a squad you own cannot be precomputed for "
-            "everyone. Expect roughly 20 seconds the first time; the result is then cached."
+    absent = missing_model_inputs()
+    if absent:
+        st.warning(
+            "This tab cannot run here — it is the one part of the app that needs the model, "
+            "and this deployment carries only the published bundle.",
+            icon="🔒",
         )
+        st.caption("Missing: " + "; ".join(absent) + ".")
+        st.markdown(
+            "Every other tab works because `fpl publish` precomputed it. Advice about a "
+            "squad you own cannot be precomputed for everyone, so it needs the archive, the "
+            "trained minutes model and a pre-deadline snapshot — all deliberately excluded "
+            "from the repository, which is what keeps this deployment small. Run it from a "
+            "full local checkout instead:"
+        )
+        st.code("fpl myteam --entry 1234567 --brief myteam.md", language="bash")
     else:
-        try:
-            with st.spinner(f"Forecasting {manifest['horizon']} gameweeks for entry {active}…"):
-                me = analyse(active, None)
-        except ImportError as exc:
-            st.error("This deployment cannot run the model, only read the published bundle.")
-            st.caption(
-                f"Missing dependency: {exc}. The My Team tab needs lightgbm, pulp and the "
-                "archive; run the app from a full checkout to use it."
-            )
-        except Exception as exc:                # noqa: BLE001 - surface, never blank the tab
-            message = str(exc)
-            if "snapshot" in message.lower():
-                # The strict point-in-time accessor, doing its job. Do not loosen it: take
-                # the missing capture instead, which is only possible before the deadline.
-                st.error("No pre-deadline snapshot exists for this gameweek yet.")
-                st.code("fpl snapshot", language="bash")
-                st.caption(
-                    "The target gameweek is read through the strict point-in-time accessor "
-                    "on purpose. Capture the state before the deadline and re-run — after "
-                    "it passes, that state is unrecoverable."
-                )
-            elif "not found" in message.lower():
-                st.error(f"No such entry: {active}. Check the number in your team URL.")
+        saved = remembered_entry()
+        controls = st.columns([2, 1, 2])
+        typed = controls[0].text_input(
+            "FPL entry id",
+            value=str(saved) if saved else "",
+            help="The number in your team URL: fantasy.premierleague.com/entry/**1234567**/event/1",
+            placeholder="1234567",
+        )
+        run = controls[1].button("Analyse", type="primary", use_container_width=True)
+        if saved:
+            controls[2].caption(f"Remembered entry **{saved}**. Type a different id to replace it.")
+
+        if run:
+            cleaned = typed.strip().lstrip("#")
+            if not cleaned.isdigit():
+                st.error("An entry id is a plain number — copy it out of your team URL.")
             else:
-                st.error(f"Could not analyse entry {active}.")
-                st.exception(exc)
+                st.session_state["myteam_entry"] = int(cleaned)
+
+        active = st.session_state.get("myteam_entry")
+        if active is None:
+            st.info("Enter your entry id and press Analyse.")
+            st.caption(
+                "This is the one tab that runs the model rather than reading the published "
+                "bundle, because advice about a squad you own cannot be precomputed for "
+                "everyone. Expect roughly 20 seconds the first time; the result is then cached."
+            )
         else:
-            remember_entry(active)
-
-            head = st.columns(5)
-            head[0].metric("Team", me["team_name"])
-            head[1].metric("Gameweek", me["gameweek"])
-            head[2].metric("In the bank", f"£{me['bank']:.1f}m")
-            head[3].metric("Free transfers", me["free_transfers"])
-            head[4].metric(
-                "Overall rank",
-                f"{me['overall_rank']:,}" if me["overall_rank"] else "—",
-                help="Last published rank. Blank until the first gameweek is scored.",
-            )
-
-            st.markdown(f"**{me['summary']}**")
-            if me["n_transfers"]:
-                out_cols = ["web_name", "position", "team", "selling_price", "horizon_points"]
-                in_cols = ["web_name", "position", "team", "price", "horizon_points"]
-                left, right = st.columns(2)
-                with left:
-                    st.caption("OUT")
-                    st.dataframe(
-                        me["transfers_out"][
-                            [c for c in out_cols if c in me["transfers_out"].columns]
-                        ].round(2), hide_index=True, use_container_width=True,
+            try:
+                with st.spinner(f"Forecasting {manifest['horizon']} gameweeks for entry {active}…"):
+                    me = analyse(active, None)
+            except (ImportError, FileNotFoundError) as exc:
+                # The guard above catches this before anyone presses the button. Kept as a
+                # backstop because it is the failure a deployment actually hits — the packages
+                # install fine and the DATA is absent — and an ImportError-only guard let a
+                # bare traceback reach the page.
+                st.error("This deployment cannot run the model, only read the published bundle.")
+                st.caption(
+                    f"Missing: {exc}. The My Team tab needs the archive, the trained minutes "
+                    "model and a pre-deadline snapshot; run it from a full local checkout."
+                )
+            except Exception as exc:                # noqa: BLE001 - surface, never blank the tab
+                message = str(exc)
+                if "snapshot" in message.lower():
+                    # The strict point-in-time accessor, doing its job. Do not loosen it: take
+                    # the missing capture instead, which is only possible before the deadline.
+                    st.error("No pre-deadline snapshot exists for this gameweek yet.")
+                    st.code("fpl snapshot", language="bash")
+                    st.caption(
+                        "The target gameweek is read through the strict point-in-time accessor "
+                        "on purpose. Capture the state before the deadline and re-run — after "
+                        "it passes, that state is unrecoverable."
                     )
-                with right:
-                    st.caption("IN")
-                    st.dataframe(
-                        me["transfers_in"][
-                            [c for c in in_cols if c in me["transfers_in"].columns]
-                        ].round(2), hide_index=True, use_container_width=True,
-                    )
-            st.caption(
-                f"Judged on the discounted {me['span']}-week horizon, not on GW"
-                f"{me['gameweek']} alone — a transfer is a durable change, and judging one on "
-                "a single week systematically over-trades. A move beyond your free transfers "
-                "must also clear 4 points."
-            )
+                elif "not found" in message.lower():
+                    st.error(f"No such entry: {active}. Check the number in your team URL.")
+                else:
+                    st.error(f"Could not analyse entry {active}.")
+                    st.exception(exc)
+            else:
+                remember_entry(active)
 
-            mine = me["squad"].copy()
-            mine["_o"] = mine["position"].map(POSITION_ORDER)
-            squad_cols = [c for c in ["web_name", "position", "team", "selling_price",
-                                      "expected_points", "horizon_points", "p_long"]
-                          if c in mine.columns]
-            st.subheader("The 15 you hold")
-            st.dataframe(
-                mine.sort_values(["_o", "expected_points"], ascending=[True, False])[squad_cols],
-                hide_index=True, use_container_width=True,
-            )
+                head = st.columns(5)
+                head[0].metric("Team", me["team_name"])
+                head[1].metric("Gameweek", me["gameweek"])
+                head[2].metric("In the bank", f"£{me['bank']:.1f}m")
+                head[3].metric("Free transfers", me["free_transfers"])
+                head[4].metric(
+                    "Overall rank",
+                    f"{me['overall_rank']:,}" if me["overall_rank"] else "—",
+                    help="Last published rank. Blank until the first gameweek is scored.",
+                )
 
-            with st.expander("Full brief — captaincy, chips, price moves, caveats"):
-                st.markdown(me["brief"])
-            st.caption(
-                "Personal to this entry, so it is rendered and never written into "
-                "`data/serving/`, which is committed. Use `fpl myteam --brief PATH` for a file."
-            )
+                st.markdown(f"**{me['summary']}**")
+                if me["n_transfers"]:
+                    out_cols = ["web_name", "position", "team", "selling_price", "horizon_points"]
+                    in_cols = ["web_name", "position", "team", "price", "horizon_points"]
+                    left, right = st.columns(2)
+                    with left:
+                        st.caption("OUT")
+                        st.dataframe(
+                            me["transfers_out"][
+                                [c for c in out_cols if c in me["transfers_out"].columns]
+                            ].round(2), hide_index=True, use_container_width=True,
+                        )
+                    with right:
+                        st.caption("IN")
+                        st.dataframe(
+                            me["transfers_in"][
+                                [c for c in in_cols if c in me["transfers_in"].columns]
+                            ].round(2), hide_index=True, use_container_width=True,
+                        )
+                st.caption(
+                    f"Judged on the discounted {me['span']}-week horizon, not on GW"
+                    f"{me['gameweek']} alone — a transfer is a durable change, and judging one on "
+                    "a single week systematically over-trades. A move beyond your free transfers "
+                    "must also clear 4 points."
+                )
+
+                mine = me["squad"].copy()
+                mine["_o"] = mine["position"].map(POSITION_ORDER)
+                squad_cols = [c for c in ["web_name", "position", "team", "selling_price",
+                                          "expected_points", "horizon_points", "p_long"]
+                              if c in mine.columns]
+                st.subheader("The 15 you hold")
+                st.dataframe(
+                    mine.sort_values(["_o", "expected_points"], ascending=[True, False])[squad_cols],
+                    hide_index=True, use_container_width=True,
+                )
+
+                with st.expander("Full brief — captaincy, chips, price moves, caveats"):
+                    st.markdown(me["brief"])
+                st.caption(
+                    "Personal to this entry, so it is rendered and never written into "
+                    "`data/serving/`, which is committed. Use `fpl myteam --brief PATH` for a file."
+                )
 
 prices = bundle.get("prices")
 if prices is not None and not prices.empty:
