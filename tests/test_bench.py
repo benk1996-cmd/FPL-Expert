@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -121,3 +123,42 @@ def test_missing_p_zero_degrades_to_no_autosubs_rather_than_guessing():
 
 def test_weights_never_exceed_one_however_bad_the_squad():
     assert max(autosub_slot_weights(np.linspace(0.5, 1.0, 10), n_slots=3)) <= 1.0
+
+
+def test_the_live_path_is_bench_aware_by_default_and_the_backtest_is_not():
+    """A deliberate, recorded divergence — not an oversight.
+
+    `analyse_entry` defaults ON so `fpl myteam` stops taking hits for bench upgrades.
+    `simulate_season` defaults OFF because every backtested number in DECISIONS was measured
+    under the sum-of-fifteen policy, and flipping it would silently invalidate them. This test
+    pins both so the gap cannot close by accident in either direction — it must be closed by
+    running the `bench_aware` ensemble variant and deciding.
+    """
+    import inspect
+
+    from fpl_expert.advice import analyse_entry
+    from fpl_expert.backtest.season_sim import simulate_season
+    from fpl_expert.cli import ENSEMBLE_VARIANTS
+
+    assert inspect.signature(analyse_entry).parameters["bench_aware"].default is True
+    assert inspect.signature(simulate_season).parameters["bench_aware"].default is False
+    assert ENSEMBLE_VARIANTS["bench_aware"] == {"bench_aware": True}
+
+
+def test_bench_aware_falls_back_loudly_rather_than_silently_when_rules_are_missing(caplog):
+    """`bench_aware=True` without `rules` cannot compute an XI. It must not quietly behave as
+    if the flag were off — that is the fallback-that-degrades-silently trap."""
+    import inspect
+
+    from fpl_expert.optimise.transfers import recommend_transfers
+
+    params = inspect.signature(recommend_transfers).parameters
+    assert params["bench_aware"].default is False      # the FUNCTION stays off by default
+    assert params["rules"].default is None
+
+    squad, candidates = _squad(_points(20.0, 5.0)), _squad(_points(30.0, 6.0))
+    candidates["player_id"] = range(100, 115)
+    with caplog.at_level(logging.WARNING):
+        recommend_transfers(squad, candidates, bank=50.0, free_transfers=1,
+                            bench_aware=True, rules=None)
+    assert "falling back" in caplog.text

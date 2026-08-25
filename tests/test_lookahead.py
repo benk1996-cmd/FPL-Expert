@@ -392,3 +392,23 @@ def test_the_hit_bar_does_not_change_what_a_hit_actually_costs():
     result = simulate_season(frame, rules=RULES, hit_bar=1.0)
     weeks = result.gameweeks[result.gameweeks["hit_cost"] > 0]
     assert (weeks["hit_cost"] % 4 == 0).all()
+
+
+def test_current_season_results_cannot_build_the_rates_that_forecast_them():
+    """Ground rule 9, in the one place it newly bites.
+
+    Until 2026-08-25 the archive stopped at last season, so `as_of` — taken from the history
+    maximum — was always safely in the past. Now that `fpl results` writes the season in
+    progress, a result for GW n would otherwise sit at or before `as_of` when forecasting GW n
+    and feed its own forecast. `forecast_gameweek` drops this season's rows from `gw` onward,
+    so the maximum is correct by construction whatever is on disk.
+    """
+    import inspect
+
+    from fpl_expert import pipeline
+
+    source = inspect.getsource(pipeline.forecast_gameweek)
+    assert 'history["GW"] >= gw' in source, "the no-lookahead filter has been removed"
+    assert source.index('history["GW"] >= gw') < source.index("as_of ="), (
+        "the filter must run BEFORE as_of is derived from the history maximum"
+    )

@@ -58,8 +58,15 @@ def analyse_entry(
     gw: int | None = None,
     span: int | None = None,
     max_transfers: int = 2,
+    bench_aware: bool = True,
 ) -> EntryAdvice:
     """Pull a real squad and work out what to do with it for the coming gameweek.
+
+    `bench_aware` judges each plan on the XI plus autosub-weighted bench rather than the sum of
+    fifteen, so a hit is not taken to upgrade a player who never starts. **On here and off in
+    `simulate_season`**, which means the live policy is no longer the one the +399 headline was
+    measured under. That gap is deliberate and temporary: it closes when the ensemble resolves
+    the default. See NEXT_SESSION.
 
     Raises `MissingSnapshotError` when no pre-deadline snapshot exists for `gw` — the target
     gameweek is read through the strict point-in-time accessor deliberately, so the fix is to
@@ -101,6 +108,7 @@ def analyse_entry(
     plan = recommend_transfers(
         held, latest, bank=in_bank, free_transfers=available,
         max_per_club=rules["squad"]["max_per_club"], max_transfers=max_transfers,
+        rules=rules, bench_aware=bench_aware,
     )
 
     return EntryAdvice(

@@ -208,6 +208,13 @@ def recommend_transfers(
         "bank": bank, "free_transfers": free_transfers, "max_per_club": max_per_club,
         "squad_quota": squad_quota, "hit_cost": hit_cost, "points_col": points_col,
     }
+    if bench_aware and rules is None:
+        # Ground rule 7: a fallback that changes the model must say so. Silently reverting to
+        # the sum-of-fifteen here would hand back a plan the caller believes was bench-aware.
+        log.warning(
+            "bench_aware=True but no `rules` given — cannot pick an XI, so falling back to the "
+            "sum-of-fifteen objective. Pass rules=load_scoring_rules() to enable it."
+        )
     if not bench_aware or rules is None:
         return _solve_transfers(squad, candidates, max_transfers=max_transfers, **common)
 

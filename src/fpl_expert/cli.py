@@ -64,6 +64,30 @@ def history(
 
 
 @app.command()
+def results(
+    gw: list[int] = typer.Option(None, "--gw", help="Repeatable; default = every settled one"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Ingest this season's completed gameweeks into the archive the models train on.
+
+    Run after each deadline, once the previous gameweek is checked. Without it `load_history`
+    stops at last season and every rate is built from players' PREVIOUS clubs — a striker's
+    first month at a new team counts for nothing. Only gameweeks FPL reports as finished and
+    data_checked are taken, so provisional bonus never enters the archive.
+    """
+    _setup_logging(verbose)
+    from .data.current_season import ingest_current_season
+
+    df = ingest_current_season(gameweeks=list(gw) if gw else None)
+    typer.echo(
+        f"  {len(df):,} rows  {df['element'].nunique()} players  "
+        f"GW {df['GW'].min()}-{df['GW'].max()}  season {df['season'].iloc[0]}"
+    )
+    played = df[df["minutes"] > 0]
+    typer.echo(f"  {len(played):,} appearances, {df['goals_scored'].sum():.0f} goals recorded")
+
+
+@app.command()
 def odds(
     seasons: list[str] = typer.Option(None, "--season", "-s", help="Repeatable; default = config"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -595,6 +619,10 @@ ENSEMBLE_VARIANTS: dict[str, dict] = {
     "decay_0.92": {"decay": 0.92},
     "free_hit": {"allowed_chips": ("bench_boost", "triple_captain", "free_hit")},
     "no_captaincy_term": {"captaincy_weight": 0.0},
+    # Judge a transfer on the XI plus autosub-weighted bench rather than the sum of fifteen.
+    # ON in the live path since 2026-08-24 and OFF here until this measures — which is a real
+    # divergence, not a formality: the +399 headline describes the sum-of-fifteen policy.
+    "bench_aware": {"bench_aware": True},
     # The bar the model has to clear. Decisions read `price_score`, so the perturbation lands
     # there too and the baseline explores its own decision paths on the same footing.
     #
@@ -940,6 +968,10 @@ def myteam(
     gw: int = typer.Option(None, "--gw", help="Gameweek to plan for; defaults to the next"),
     horizon: int = typer.Option(None, "--horizon", help="Gameweeks to plan over"),
     max_transfers: int = typer.Option(2, "--max-transfers"),
+    bench_aware: bool = typer.Option(
+        True, "--bench-aware/--no-bench-aware",
+        help="Value bench places by autosub odds rather than as starting places.",
+    ),
     brief: str = typer.Option(
         None, "--brief", help="Write a full markdown brief here (transfers, chips, prices)"
     ),
@@ -960,7 +992,9 @@ def myteam(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    result = analyse_entry(entry, gw=gw, span=horizon, max_transfers=max_transfers)
+    result = analyse_entry(
+        entry, gw=gw, span=horizon, max_transfers=max_transfers, bench_aware=bench_aware,
+    )
     target, span, plan = result.gameweek, result.span, result.plan
     typer.echo(f"{result.team_name} — GW{target}, planning over {span} gameweek(s)")
     typer.echo(

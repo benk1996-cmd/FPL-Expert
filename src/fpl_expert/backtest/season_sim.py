@@ -353,6 +353,7 @@ def simulate_season(
     lookahead: dict[int, dict[int, pd.DataFrame]] | None = None,
     smoothing: float = 0.0,
     hit_bar: float | None = None,
+    bench_aware: bool = False,
 ) -> SeasonResult:
     """Replay a season: pick an opening squad, then one transfer a gameweek when worth it.
 
@@ -437,7 +438,7 @@ def simulate_season(
             if transfer_policy == "milp":
                 squad, bank, transfers, hits, plan = _milp_transfer(
                     squad, bank, frame, rules, decision_col, free_transfers, max_transfers,
-                    purchase, hit_bar,
+                    purchase, hit_bar, bench_aware,
                 )
                 if plan is not None:
                     moves = {
@@ -743,7 +744,7 @@ def selling_prices(held: pd.DataFrame, purchase: dict) -> pd.Series:
 
 
 def _milp_transfer(squad, bank, frame, rules, points_col, free_transfers, max_transfers,
-                   purchase=None, hit_bar=None):
+                   purchase=None, hit_bar=None, bench_aware=False):
     """Transfers chosen by the real optimiser rather than a single greedy swap.
 
     The greedy policy examines exactly one candidate move per gameweek and cannot express
@@ -771,6 +772,7 @@ def _milp_transfer(squad, bank, frame, rules, points_col, free_transfers, max_tr
             max_per_club=rules["squad"]["max_per_club"],
             squad_quota=rules["squad"]["positions"],
             max_transfers=max_transfers, points_col=points_col,
+            rules=rules, bench_aware=bench_aware,
             **({} if hit_bar is None else {"hit_cost": hit_bar}),
         )
     except (RuntimeError, ValueError) as exc:

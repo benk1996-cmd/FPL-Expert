@@ -10,7 +10,7 @@ import logging
 
 import pandas as pd
 
-from .config import project_root
+from .config import load_config, project_root
 from .data.historical import load_history
 from .data.overrides import apply_availability_overrides
 from .data.snapshot import PointInTime
@@ -157,6 +157,20 @@ def forecast_gameweek(
     # --- rates from history
     history = load_history()
     history = history[history["season"] >= RATE_HISTORY_FROM]
+    # The archive now contains the CURRENT season, so for the first time `as_of` could sit at
+    # or after the gameweek being forecast. `decay_weights` zeroes rows at or after `as_of`,
+    # but `as_of` is derived from the history maximum rather than from the target — so a
+    # result for GW n would build the rates used to forecast GW n. Ground rule 9: a forecast
+    # has two dates. Drop this season's rows from `gw` onward and the maximum is correct by
+    # construction, whatever is on disk.
+    current = str(load_config().project.get("season", "")).replace("/", "-")
+    before = len(history)
+    history = history[~((history["season"] == current) & (history["GW"] >= gw))]
+    if len(history) < before:
+        log.info(
+            "no-lookahead: dropped %d %s row(s) at or after GW%d before computing rates",
+            before - len(history), current, gw,
+        )
     as_of = season_gw_index(history["season"], history["GW"]).max() + 1
     rates = player_rates(history, as_of)
 

@@ -161,6 +161,7 @@ pip install -e .
 fpl status     # where the season is, and what rules are loaded
 fpl update     # pull the current season's core feeds from the FPL API
 fpl history    # download past seasons + print the column-coverage report
+fpl results    # ingest THIS season's settled gameweeks into that same archive
 fpl odds       # download bookmaker odds from football-data.co.uk
 fpl snapshot   # capture pre-deadline state; --if-due makes it safe to run hourly
 fpl snapshots  # list captures, and flag gameweeks with no pre-deadline snapshot
@@ -207,7 +208,7 @@ so a stale copy is misleading rather than harmful.
 ### Before the GW1 deadline
 
 The live commands are current in code but their inputs are only as fresh as the last pull.
-Run `fpl update` (prices, availability, fixtures move daily) and `fpl snapshot` close to the
+Run `fpl results` after each gameweek is checked — without it the rates are built from prior seasons alone and a player's form at a new club counts for nothing. Then run `fpl update` (prices, availability, fixtures move daily) and `fpl snapshot` close to the
 deadline.
 
 ## Data layers

@@ -132,6 +132,47 @@ a reader meets with no date attached.**
   `FileNotFoundError` traceback reached the page. The tab now checks its inputs up front and
   explains, rather than offering a button that spins for twenty seconds and fails.
 
+## 2026-08-25: the archive stopped at last May, and nothing was going to fix that
+
+**The models were training on prior seasons only, a week into the new one.** `fpl history`
+downloads COMPLETED seasons from the community archive; `fpl update` pulls the bootstrap,
+which is current *state* and carries no per-gameweek results. So no `season=2026-27` partition
+existed and none would have: every rate was built from players at their PREVIOUS clubs, and
+the gap widened by one gameweek a week. Calvert-Lewin's xG rate was Everton's Calvert-Lewin.
+
+`fpl results` closes it — 610 rows for GW1, one per player-fixture, written into
+`interim/history` alongside the archive partitions.
+
+**Why `element-summary` and not `event/{gw}/live`.** The live endpoint is one call per
+gameweek instead of one per player, but it collapses a double gameweek into a single entry and
+exposes per-fixture detail only for scoring identifiers — no per-fixture expected goals.
+`element-summary/{id}/history` returns one row per FIXTURE with the full stat line, plus
+`value` (price at the time) and `kickoff_time` for rest days. It matches the archive's shape,
+so the partitions concatenate without harmonisation. ~610 polite requests, about ten minutes,
+once a week.
+
+**Only `finished AND data_checked` gameweeks are taken.** `finished` flips first, while bonus
+is still provisional; a half-settled gameweek in the archive is indistinguishable from a real
+one and would tell every rate that a striker played zero minutes that week.
+
+### Two traps this sprang, both now guarded
+
+1. **Lookahead, newly possible for the first time.** `as_of` is derived from the history
+   MAXIMUM, not from the gameweek being forecast. That was safe only because the archive
+   stopped last May. With the current season on disk, a result for GW n would sit at or before
+   `as_of` when forecasting GW n and feed its own forecast — ground rule 9, exactly.
+   `forecast_gameweek` now drops this season's rows from `gw` onward before computing rates,
+   so the maximum is correct by construction whatever is on disk. Tested.
+2. **The API sends expected goals as a STRING.** Nine columns differ in dtype from the archive
+   — including `expected_goals` and `expected_assists`, the two most important rate inputs.
+   Concatenation produced an object column that survived the write and failed on the first
+   multiplication, deep in the rate calculation, with a traceback pointing at pandas. Coerced
+   at ingestion, plus `schema_mismatches()` and a test comparing the written partition against
+   the archive's dtypes — the check that would have caught it at the cause.
+
+**Run `fpl results` after each gameweek is checked.** It is now the first step of the weekly
+loop, before `fpl publish`.
+
 ## Everything previously listed here is now closed
 
 Worked through 2026-08-11. Outcomes, so nobody re-opens them blind:
