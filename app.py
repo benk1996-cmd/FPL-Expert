@@ -39,12 +39,34 @@ BUNDLE = Path(
 )
 POSITION_ORDER = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
 
+
+def _entry_from_env() -> int | None:
+    """`FPL_ENTRY`, from the environment or a local `.env`, or None if unset.
+
+    Parsed here rather than with `python-dotenv` so the front end keeps its three-package
+    dependency list — it reads a precomputed bundle and must install without the modelling
+    stack. The CLI uses `fpl_expert.config.entry_id`, which does use dotenv; both read the
+    same variable from the same file, so there is still one place to change the id.
+    """
+    raw = os.environ.get("FPL_ENTRY", "").strip()
+    if not raw:
+        env_file = Path(__file__).parent / ".env"
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                key, _, value = line.partition("=")
+                if key.strip() == "FPL_ENTRY" and not line.lstrip().startswith("#"):
+                    raw = value.strip().strip("\"'")
+                    break
+        except OSError:
+            return None
+    return int(raw) if raw.isdigit() else None
+
+
 # The one entry this app reports on. Previously a text box that accepted any id, with the last
 # one remembered on disk; both are gone. A single owner needs no picker, and an arbitrary-entry
 # box on a public deployment invites looking up other people's squads through a page that
 # carries this project's recommendations — which would read as advice about them.
-# Env-overridable so a different owner can run the same app without editing it.
-ENTRY = int(os.environ.get("FPL_ENTRY", "3468852"))
+ENTRY = _entry_from_env()
 
 st.set_page_config(page_title="FPL Expert", page_icon="⚽", layout="wide")
 
@@ -368,7 +390,15 @@ with myteam_tab:
     )
 
     absent = missing_model_inputs()
-    if absent:
+    if ENTRY is None:
+        st.warning("No entry id configured, so there is no squad to report on.", icon="🔧")
+        st.markdown(
+            "Set `FPL_ENTRY` to the number in your team URL — either in the environment, or "
+            "in a `.env` file at the repository root (copy `.env.example`). The `fpl myteam` "
+            "command reads the same variable."
+        )
+        st.code("FPL_ENTRY=1234567", language="bash")
+    elif absent:
         st.warning(
             "This tab cannot run here — it is the one part of the app that needs the model, "
             "and this deployment carries only the published bundle.",

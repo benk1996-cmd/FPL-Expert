@@ -8,9 +8,11 @@ each season under the rules that were actually in force at the time.
 from __future__ import annotations
 
 import functools
+import os
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict
 
 
@@ -93,3 +95,35 @@ def load_config(path: Path | None = None) -> Config:
 def load_scoring_rules(path: Path | None = None) -> dict:
     """Raw dict — the scoring table is data, and Item 10 consumes it as such."""
     return _read_yaml(path or project_root() / "config" / "scoring_rules.yaml")
+
+
+ENTRY_VAR = "FPL_ENTRY"
+
+
+def load_env(path: Path | None = None) -> None:
+    """Read `.env` into the environment, without overriding what is already set.
+
+    A real environment variable beats the file, which is the conventional precedence and the
+    one that lets a deployment or a one-off shell override the checked-out default.
+    """
+    load_dotenv(path or project_root() / ".env", override=False)
+
+
+def entry_id(explicit: int | None = None) -> int:
+    """The FPL manager id to act on: the argument if given, else `FPL_ENTRY` from `.env`.
+
+    Resolved at the CLI boundary rather than inside `analyse_entry`, so the library function
+    stays explicit about whose squad it is reading and nothing picks up an ambient identity.
+    """
+    if explicit is not None:
+        return int(explicit)
+    load_env()
+    raw = os.environ.get(ENTRY_VAR, "").strip()
+    if not raw:
+        raise ValueError(
+            f"no entry id: pass --entry, or set {ENTRY_VAR} in a .env file at the repo root "
+            f"(see .env.example). It is the number in your team URL."
+        )
+    if not raw.isdigit():
+        raise ValueError(f"{ENTRY_VAR}={raw!r} is not a plain number — copy it from your team URL")
+    return int(raw)

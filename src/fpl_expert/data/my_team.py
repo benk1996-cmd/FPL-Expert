@@ -61,17 +61,44 @@ def fetch_transfers(api: FplApi, entry_id: int) -> pd.DataFrame:
 
 
 def purchase_prices(
-    initial_picks: pd.DataFrame, transfers: pd.DataFrame, current_squad: set[int]
+    initial_picks: pd.DataFrame,
+    transfers: pd.DataFrame,
+    current_squad: set[int],
+    start_prices: dict[int, int] | None = None,
 ) -> dict[int, int]:
     """What you actually paid for each player currently held, in tenths.
 
-    Players from the opening squad were bought at their GW1 price; anyone transferred in
-    later was bought at `element_in_cost`. Replaying the transfer log in order handles a
+    Players from the opening squad were bought at their season-start price; anyone transferred
+    in later was bought at `element_in_cost`. Replaying the transfer log in order handles a
     player bought, sold and bought again at a different price.
+
+    **The public picks endpoint carries no purchase price.** `purchase_price` exists only on
+    the authenticated `my-team` payload, which this module deliberately does not use, so
+    `getattr(row, "purchase_price", 0)` silently recorded every opening-squad player as bought
+    for nothing — and `selling_price_tenths(0, current)` then returned HALF his market value.
+    That halved the budget of every transfer solve from GW2 onward, which is invisible unless
+    you read the numbers: a squad of unmoved players quietly appeared to be worth 50% of what
+    it cost. Opening-squad prices now come from `start_prices` (`now_cost - cost_change_start`).
+    The `purchase_price` branch is kept for a future authenticated path and is what the older
+    tests exercise.
     """
+    start_prices = start_prices or {}
     paid: dict[int, int] = {}
+    unknown: list[int] = []
     for row in initial_picks.itertuples():
-        paid[int(row.element)] = int(getattr(row, "purchase_price", 0) or 0)
+        element = int(row.element)
+        price = getattr(row, "purchase_price", None)
+        if price is None or pd.isna(price):
+            price = start_prices.get(element)
+        if price is None:
+            unknown.append(element)             # caller falls back to market price
+            continue
+        paid[element] = int(price)
+    if unknown:
+        log.warning(
+            "no purchase price for %d opening-squad player(s) %s — falling back to market "
+            "price, which understates any profit you are owed", len(unknown), unknown[:5],
+        )
 
     if not transfers.empty:
         for row in transfers.sort_values("event").itertuples():
@@ -115,7 +142,18 @@ def current_squad(
 
     first_picks = api.entry_picks(entry_id, 1, use_cache=True)
     initial = pd.DataFrame(first_picks["picks"]) if first_picks else pd.DataFrame(columns=["element"])
-    paid = purchase_prices(initial, transfers, held)
+    # Season-start price: what an opening-squad player cost, and the only source for it that
+    # does not require logging in. `cost_change_start` is cumulative since the season opened.
+    start_prices = None
+    if {"id", "now_cost", "cost_change_start"} <= set(players.columns):
+        start_prices = dict(
+            zip(
+                players["id"].astype(int),
+                (players["now_cost"] - players["cost_change_start"]).astype(int),
+                strict=True,
+            )
+        )
+    paid = purchase_prices(initial, transfers, held, start_prices=start_prices)
 
     squad = players[players["id"].isin(held)].copy()
     squad["purchase_price_tenths"] = squad["id"].map(paid).fillna(squad["now_cost"]).astype(int)

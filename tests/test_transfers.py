@@ -207,3 +207,32 @@ def test_horizon_includes_the_captaincy_premium_by_default():
     out = horizon_points(frames, decay=1.0).set_index("player_id")
     assert out.loc[1, "horizon_points"] > 20.0
     assert out.loc[1, "captaincy_uplift"] > out.loc[2, "captaincy_uplift"]
+
+
+def test_opening_squad_prices_come_from_the_season_start_not_a_missing_field():
+    """The public picks endpoint has no `purchase_price` — only the authenticated one does.
+
+    Reading it with a default of 0 made `selling_price_tenths(0, current)` return half the
+    market price for every unmoved player, halving the budget of every transfer solve from GW2
+    on. Nothing failed; the numbers were just quietly wrong.
+    """
+    initial = pd.DataFrame({"element": [1, 2]})          # exactly what the API returns
+    transfers = pd.DataFrame(columns=["element_in", "element_out", "element_in_cost",
+                                      "element_out_cost", "event"])
+
+    paid = purchase_prices(initial, transfers, {1, 2}, start_prices={1: 80, 2: 55})
+
+    assert paid == {1: 80, 2: 55}
+    assert selling_price_tenths(paid[1], 80) == 80       # unmoved price sells for what it cost
+
+
+def test_an_opening_player_with_no_known_start_price_is_omitted_not_zeroed():
+    """Omitted means the caller falls back to market price. Zero would mean half of it."""
+    initial = pd.DataFrame({"element": [1, 2]})
+    transfers = pd.DataFrame(columns=["element_in", "element_out", "element_in_cost",
+                                      "element_out_cost", "event"])
+
+    paid = purchase_prices(initial, transfers, {1, 2}, start_prices={1: 80})
+
+    assert paid == {1: 80}
+    assert 2 not in paid

@@ -933,7 +933,10 @@ def monitor(
 
 @app.command()
 def myteam(
-    entry: int = typer.Option(..., "--entry", help="Your FPL manager id (from your team URL)"),
+    entry: int = typer.Option(
+        None, "--entry",
+        help="Your FPL manager id. Defaults to FPL_ENTRY in .env, so it can be omitted.",
+    ),
     gw: int = typer.Option(None, "--gw", help="Gameweek to plan for; defaults to the next"),
     horizon: int = typer.Option(None, "--horizon", help="Gameweeks to plan over"),
     max_transfers: int = typer.Option(2, "--max-transfers"),
@@ -947,10 +950,15 @@ def myteam(
     import warnings
 
     from .advice import analyse_entry
-    from .config import load_scoring_rules
+    from .config import entry_id, load_scoring_rules
 
     warnings.filterwarnings("ignore")
     rules = load_scoring_rules()
+
+    try:
+        entry = entry_id(entry)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
     result = analyse_entry(entry, gw=gw, span=horizon, max_transfers=max_transfers)
     target, span, plan = result.gameweek, result.span, result.plan

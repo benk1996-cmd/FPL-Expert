@@ -172,8 +172,9 @@ fpl report --gw 1  # weekly decision brief (XI, captain, risks, differentials, c
 fpl simulate -s 2023-24 -s 2024-25 -s 2025-26   # replay seasons + component ablation
 fpl repeat -s 2025-26 --draws 150   # replay many times over resampled outcomes, for error bars
 fpl prices --season 2025-26   # price-change model: expected risers and fallers
-fpl myteam --entry N          # pull your real squad and recommend transfers
-fpl myteam --entry N --brief out.md   # ...as a full brief: transfers, chips, price moves
+fpl myteam                    # pull your real squad and recommend transfers
+fpl myteam --brief out.md     # ...as a full brief: transfers, chips, price moves
+fpl myteam --entry N          # ...for a different entry than FPL_ENTRY
 fpl validate       # component accuracy, calibration, top-N precision
 fpl monitor        # standing health checks against pre-committed thresholds
 ```

@@ -12,6 +12,7 @@ import pandas as pd
 
 from .config import project_root
 from .data.historical import load_history
+from .data.overrides import apply_availability_overrides
 from .data.snapshot import PointInTime
 from .data.storage import read_table
 from .features.rates import decayed_totals, season_gw_index
@@ -143,7 +144,10 @@ def forecast_gameweek(
     missing snapshot is an error, which is what any evaluation of the past needs.
     """
     pit = PointInTime.for_planning(gw) if planning else PointInTime.for_gameweek(gw)
-    players = pit.players()
+    # Applied to the frame, never to the snapshot: `data/raw/` stays exactly as captured. This
+    # is the live path's only hand-entered input, and it corrects a STALE FPL field rather than
+    # tuning anything. It cannot reach the backtest, which has no availability data to override.
+    players = apply_availability_overrides(pit.players())
     players["name"] = _full_name(players)
     players["position"] = players["element_type"].map(POSITION_BY_TYPE)
 

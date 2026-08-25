@@ -54,7 +54,7 @@ class TransferPlan:
         return "\n".join(lines)
 
 
-def recommend_transfers(
+def _solve_transfers(
     squad: pd.DataFrame,
     candidates: pd.DataFrame,
     *,
@@ -65,6 +65,7 @@ def recommend_transfers(
     max_transfers: int = 3,
     hit_cost: float = HIT_COST,
     points_col: str = "horizon_points",
+    exact_transfers: int | None = None,
 ) -> TransferPlan:
     """Choose the transfers worth making, if any.
 
@@ -102,6 +103,10 @@ def recommend_transfers(
     # Squad size is fixed: every sale must be matched by a purchase.
     problem += n_out == n_in
     problem += n_out <= max_transfers
+    if exact_transfers is not None:
+        # Used by the bench-aware wrapper, which needs the best plan AT each size so it can
+        # rescore them against one another on a value the MILP cannot express.
+        problem += n_out == exact_transfers
     problem += hits >= n_out - free_transfers
     problem += hits >= 0
 
@@ -164,6 +169,83 @@ def recommend_transfers(
         status=status,
         meta={"free_transfers": free_transfers, "candidates": len(pool)},
     )
+
+
+def recommend_transfers(
+    squad: pd.DataFrame,
+    candidates: pd.DataFrame,
+    *,
+    bank: float,
+    free_transfers: int,
+    max_per_club: int = 3,
+    squad_quota: dict[str, int] | None = None,
+    max_transfers: int = 3,
+    hit_cost: float = HIT_COST,
+    points_col: str = "horizon_points",
+    rules: dict | None = None,
+    bench_aware: bool = False,
+) -> TransferPlan:
+    """Choose the transfers worth making, if any.
+
+    With `bench_aware=False` this is the plain MILP: it maximises the change in the SUM of
+    fifteen players' points, which treats a fourth-choice defender as worth exactly as much as
+    the captain. That over-values depth, and it is how a -4 hit gets taken to upgrade a player
+    who never starts.
+
+    With `bench_aware=True` and `rules` supplied, each plan is instead judged on
+    `bench.squad_value` — the XI in full plus each bench place weighted by the chance an
+    autosub reaches it. That value cannot be written as a MILP objective, because it depends on
+    which eleven the post-transfer squad would field, which is itself an optimisation over the
+    solution. So the MILP proposes the best plan AT each transfer count and those few plans are
+    rescored exactly. Solve-once, rescore-many — the same shape as the season simulator.
+
+    **Off by default and not yet measured.** It corrects a real inconsistency (`select_squad`
+    already discounts the bench, at a flat guessed 0.10) but this project has watched six
+    principled corrections measure to nothing, and a change to the transfer policy needs the
+    ensemble to resolve. See ground rule 3.
+    """
+    common = {
+        "bank": bank, "free_transfers": free_transfers, "max_per_club": max_per_club,
+        "squad_quota": squad_quota, "hit_cost": hit_cost, "points_col": points_col,
+    }
+    if not bench_aware or rules is None:
+        return _solve_transfers(squad, candidates, max_transfers=max_transfers, **common)
+
+    from .bench import squad_value
+
+    pool = candidates[~candidates["player_id"].isin(squad["player_id"])]
+    before = squad_value(squad, rules, points_col=points_col)
+
+    best, best_score, scored = None, None, []
+    for n in range(max_transfers + 1):
+        try:
+            plan = _solve_transfers(
+                squad, candidates, max_transfers=max_transfers, exact_transfers=n, **common
+            )
+        except ValueError:
+            continue
+        if plan.n_transfers != n:
+            continue                      # infeasible at this size; CBC returned nothing
+        kept = squad[~squad["player_id"].isin(plan.transfers_out["player_id"])]
+        after_squad = pd.concat([kept, plan.transfers_in], ignore_index=True)
+        after = squad_value(after_squad, rules, points_col=points_col)
+        score = after - before - plan.hit_cost
+        scored.append({"n": n, "delta": after - before, "hits": plan.hit_cost, "net": score})
+        if best_score is None or score > best_score:
+            best, best_score = plan, score
+
+    if best is None:                      # nothing solved; fall back to the plain objective
+        return _solve_transfers(squad, candidates, max_transfers=max_transfers, **common)
+
+    # Report the value the DECISION was made on, not the sum-of-fifteen the MILP proposed it
+    # with — otherwise the summary quotes a number nothing was chosen by.
+    chosen = next(row for row in scored if row["n"] == best.n_transfers)
+    best.gain = float(chosen["delta"])
+    best.net_gain = float(chosen["net"])
+    best.meta = {**best.meta, "bench_aware": True, "considered": scored,
+                 "squad_value_before": before, "candidates": len(pool)}
+    log.info("bench-aware rescoring: %s", scored)
+    return best
 
 
 def horizon_points(
