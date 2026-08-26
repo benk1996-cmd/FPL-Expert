@@ -10,18 +10,18 @@
   ],
   "horizon": 6,
   "points_col": "horizon_points",
-  "built_at": "2026-08-24T13:47:20+00:00",
+  "built_at": "2026-08-25T16:08:25+00:00",
   "players": 609,
   "variants": {
     "standard": {
       "squad_cost": 100.0,
-      "expected_points": 54.33,
+      "expected_points": 65.26,
       "captain": "B.Fernandes",
       "vice_captain": "Haaland"
     }
   },
   "squad_cost": 100.0,
-  "expected_points": 54.33,
+  "expected_points": 65.26,
   "captain": "B.Fernandes",
   "vice_captain": "Haaland",
   "has_prices": false,

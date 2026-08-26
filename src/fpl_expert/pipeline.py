@@ -129,6 +129,22 @@ def player_rates(history: pd.DataFrame, as_of: float) -> pd.DataFrame:
     return out
 
 
+def truncate_before(archive: pd.DataFrame, season: str, gw: int) -> pd.DataFrame:
+    """Drop `season`'s rows at or after `gw`, so nothing can read the week being forecast.
+
+    Extracted so it is testable without standing up the whole pipeline — an earlier version of
+    this guard was asserted on by grepping the source, which passed until the variable was
+    renamed and then failed for a reason unrelated to the behaviour it was protecting.
+    """
+    before = len(archive)
+    out = archive[~((archive["season"] == season) & (archive["GW"] >= gw))]
+    if len(out) < before:
+        log.info(
+            "no-lookahead: dropped %d %s row(s) at or after GW%d", before - len(out), season, gw
+        )
+    return out
+
+
 def forecast_gameweek(
     gw: int,
     *,
@@ -154,33 +170,44 @@ def forecast_gameweek(
     teams = read_table("interim", "teams", season="2026-27").set_index("id")["name"]
     players["team_name"] = players["team"].map(teams)
 
+    # --- history, truncated so nothing can read the week it is forecasting
+    season = str(load_config().project.get("season", "")).replace("/", "-")
+    archive = load_history()
+    # The archive now contains the CURRENT season, which changes two things that were
+    # previously safe only by accident:
+    #
+    #  1. `as_of` is derived from the history MAXIMUM, not from the target gameweek, and
+    #     `decay_weights` zeroes rows at or after it. With this season on disk, a result for
+    #     GW n would sit before `as_of` when forecasting GW n and build its own forecast.
+    #     Ground rule 9: a forecast has two dates.
+    #  2. `build_features` is handed history plus a PLACEHOLDER row for the gameweek being
+    #     forecast. A real row for that week would sit alongside the placeholder, and the
+    #     merge into `base` would then emit TWO rows per player — one built from the real
+    #     result, one from the placeholder — silently doubling the squad's expected points.
+    #
+    # Truncating once, here, fixes both by construction whatever is on disk.
+    archive = truncate_before(archive, season, gw)
+
     # --- rates from history
-    history = load_history()
-    history = history[history["season"] >= RATE_HISTORY_FROM]
-    # The archive now contains the CURRENT season, so for the first time `as_of` could sit at
-    # or after the gameweek being forecast. `decay_weights` zeroes rows at or after `as_of`,
-    # but `as_of` is derived from the history maximum rather than from the target — so a
-    # result for GW n would build the rates used to forecast GW n. Ground rule 9: a forecast
-    # has two dates. Drop this season's rows from `gw` onward and the maximum is correct by
-    # construction, whatever is on disk.
-    current = str(load_config().project.get("season", "")).replace("/", "-")
-    before = len(history)
-    history = history[~((history["season"] == current) & (history["GW"] >= gw))]
-    if len(history) < before:
-        log.info(
-            "no-lookahead: dropped %d %s row(s) at or after GW%d before computing rates",
-            before - len(history), current, gw,
-        )
+    history = archive[archive["season"] >= RATE_HISTORY_FROM]
     as_of = season_gw_index(history["season"], history["GW"]).max() + 1
     rates = player_rates(history, as_of)
 
     # --- minutes
     placeholder = pd.DataFrame({
-        "name": players["name"], "season": "2026-27", "GW": gw, "minutes": 0.0,
+        "name": players["name"], "season": season, "GW": gw, "minutes": 0.0,
         "position": players["position"], "value": players["now_cost"],
     })
-    features = build_features(pd.concat([load_history(), placeholder], ignore_index=True))
-    current = features[features["season"] == "2026-27"].reset_index(drop=True)
+    features = build_features(pd.concat([archive, placeholder], ignore_index=True))
+    current = features[
+        (features["season"] == season) & (features["GW"] == gw)
+    ].reset_index(drop=True)
+    if len(current) != len(players):
+        raise ValueError(
+            f"expected one feature row per player for GW{gw}, got {len(current)} for "
+            f"{len(players)} players — a real result for this gameweek is sitting alongside "
+            f"the placeholder and would double every forecast"
+        )
     model = MinutesModel.load(project_root() / "data" / "processed" / "models" / "minutes.txt")
     minutes = model.predict(current).reset_index(drop=True)
     minutes["name"] = current["name"]

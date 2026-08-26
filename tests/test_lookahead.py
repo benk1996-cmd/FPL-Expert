@@ -398,17 +398,26 @@ def test_current_season_results_cannot_build_the_rates_that_forecast_them():
     """Ground rule 9, in the one place it newly bites.
 
     Until 2026-08-25 the archive stopped at last season, so `as_of` — taken from the history
-    maximum — was always safely in the past. Now that `fpl results` writes the season in
-    progress, a result for GW n would otherwise sit at or before `as_of` when forecasting GW n
-    and feed its own forecast. `forecast_gameweek` drops this season's rows from `gw` onward,
-    so the maximum is correct by construction whatever is on disk.
+    maximum — was always safely in the past, and the minutes placeholder was the only row for
+    the target gameweek. `fpl results` broke both assumptions at once: a result for GW n would
+    have built the rates forecasting GW n, AND sat alongside the placeholder so every player
+    got two feature rows and double the expected points.
+
+    Asserted on BEHAVIOUR. The previous version grepped the source for a variable name and
+    broke on a rename, which is not the thing worth protecting.
     """
-    import inspect
+    import pandas as pd
 
-    from fpl_expert import pipeline
+    from fpl_expert.pipeline import truncate_before
 
-    source = inspect.getsource(pipeline.forecast_gameweek)
-    assert 'history["GW"] >= gw' in source, "the no-lookahead filter has been removed"
-    assert source.index('history["GW"] >= gw') < source.index("as_of ="), (
-        "the filter must run BEFORE as_of is derived from the history maximum"
-    )
+    archive = pd.DataFrame({
+        "season": ["2025-26", "2026-27", "2026-27", "2026-27"],
+        "GW": [38, 1, 2, 3],
+        "minutes": [90, 90, 90, 90],
+    })
+    kept = truncate_before(archive, "2026-27", 2)
+
+    assert kept["GW"].tolist() == [38, 1]          # GW2 itself and GW3 are gone
+    assert len(truncate_before(archive, "2026-27", 1)) == 1       # only last season survives
+    assert len(truncate_before(archive, "2026-27", 9)) == 4       # nothing to drop yet
+    assert len(truncate_before(archive, "2027-28", 2)) == 4       # a different season is safe
