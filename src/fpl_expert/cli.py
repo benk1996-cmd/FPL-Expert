@@ -291,7 +291,8 @@ def _horizon_frame(gw: int, span: int, decay: float, echo: bool = True,
     return frame, "horizon_points", by_gw
 
 
-def _brief(path, latest, solution, gw, span, rules, plan=None, held=None) -> str:
+def _brief(path, latest, solution, gw, span, rules, plan=None, held=None,
+           current_squad=None, report_rules=None, move=None) -> str:
     """Build the weekly decision brief, writing it only when given somewhere to write.
 
     `report` solves an ideal squad from scratch and has no transfer plan to show; `myteam`
@@ -326,6 +327,7 @@ def _brief(path, latest, solution, gw, span, rules, plan=None, held=None) -> str
     markdown = build_report(
         latest, solution, gw, plan=plan, chip_values=values,
         risers=risers, fallers=fallers,
+        current_squad=current_squad, rules=report_rules, move=move,
     )
     if path is not None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -1073,27 +1075,48 @@ def myteam_brief(result, rules, *, path=None) -> str:
 
     from .backtest.season_sim import pick_xi
     from .optimise.squad import SquadSolution
+    from .reporting.gw_report import xi_value
 
     held, plan = result.held, result.plan
-    ranked, starters = pick_xi(held, rules, "expected_points")
+
+    # The XI is picked from the squad you would hold AFTER the plan. Until 2026-08-26 it was
+    # picked from `held`, so the brief recommended buying a player and then printed a team
+    # sheet that neither contained him nor dropped the man being sold — Watkins sat on the
+    # bench at 0.00 while Calvert-Lewin appeared nowhere. It understated the gameweek by 2.6
+    # points and named two starters who would in fact have been displaced.
+    fielded = held
+    if plan is not None and plan.n_transfers:
+        sold = set(plan.transfers_out["player_id"])
+        fielded = pd.concat(
+            [held[~held["player_id"].isin(sold)], plan.transfers_in], ignore_index=True
+        )
+
+    ranked, starters = pick_xi(fielded, rules, "expected_points")
     bench = ranked.drop(index=starters.index)
     captain = starters.nlargest(1, "expected_points")
 
     solution = SquadSolution(
-        squad=held, starting_xi=starters, bench=bench,
+        squad=fielded, starting_xi=starters, bench=bench,
         captain=captain.iloc[0] if not captain.empty else pd.Series(dtype=object),
         vice_captain=(
             starters.nlargest(2, "expected_points").iloc[-1]
             if len(starters) > 1 else pd.Series(dtype=object)
         ),
-        total_cost=float(held["price"].fillna(0).sum()),
+        total_cost=float(fielded["price"].fillna(0).sum()),
         expected_points=float(starters["expected_points"].sum()),
         status="held squad",
     )
 
+    before = xi_value(held, rules)
+    after = xi_value(fielded, rules)
+    _, before_xi = pick_xi(held, rules, "expected_points")
+    entering = set(starters["web_name"]) - set(before_xi["web_name"])
+    leaving = set(before_xi["web_name"]) - set(starters["web_name"])
+
     return _brief(
         path, result.latest, solution, result.gameweek, result.span, rules,
-        plan=plan, held=held,
+        plan=plan, held=fielded,
+        current_squad=held, report_rules=rules, move=(before, after, entering, leaving),
     )
 
 

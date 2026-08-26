@@ -114,6 +114,85 @@ def price_section(risers: pd.DataFrame | None, fallers: pd.DataFrame | None) -> 
     return lines
 
 
+def xi_value(squad: pd.DataFrame, rules: dict, points_col: str = "expected_points") -> float:
+    """This gameweek's score for a squad: the best legal XI plus the armband again.
+
+    The armband is counted twice because the captain scores twice — the same convention the
+    manifest and `SquadSolution.expected_points` use, so the two are comparable.
+    """
+    from ..backtest.season_sim import pick_xi
+
+    if squad.empty:
+        return 0.0
+    _, starters = pick_xi(squad, rules, points_col)
+    if starters.empty:
+        return 0.0
+    return float(starters[points_col].sum() + starters[points_col].max())
+
+
+def current_team_section(squad: pd.DataFrame, rules: dict) -> list[str]:
+    """The team you hold RIGHT NOW, before any transfer — the do-nothing baseline.
+
+    Worth printing even when a transfer is recommended: it is what you field if you decide to
+    roll instead, and it is the number the gain below is measured against.
+    """
+    from ..backtest.season_sim import pick_xi
+
+    if squad.empty:
+        return []
+    order = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
+    ranked, starters = pick_xi(squad, rules, "expected_points")
+    bench = ranked.drop(index=starters.index)
+    starters = starters.assign(_o=lambda d: d["position"].map(order)).sort_values(
+        ["_o", "expected_points"], ascending=[True, False]
+    )
+    return [
+        "",
+        "## Your team as it stands",
+        (f"No transfer made. Expected **{xi_value(squad, rules):.1f}** points this "
+         "gameweek, captain included."),
+        "```",
+        _fmt(starters, DISPLAY, rows=11),
+        "```",
+        "*bench*",
+        "```",
+        _fmt(bench.sort_values("expected_points", ascending=False), DISPLAY, rows=4),
+        "```",
+    ]
+
+
+def move_section(before: float, after: float, plan, rules: dict, entering, leaving) -> list[str]:
+    """What the recommended move is actually worth, split into its two honest halves.
+
+    They answer different questions and are not comparable. The gameweek figure is what you
+    gain THIS week from a better eleven. The horizon figure is what the optimiser chose on —
+    six decayed gameweeks — and is the one that justified paying any hit.
+    """
+    if plan is None or not getattr(plan, "n_transfers", 0):
+        return []
+    hit = getattr(plan, "hit_cost", 0.0)
+    lines = [
+        "",
+        "## What the move buys",
+        "```",
+        f"this gameweek      {before:6.2f}  ->  {after:6.2f}   {after - before:+.2f}",
+        f"over the horizon                        {plan.gain:+.2f}"
+        + (f"   net {plan.net_gain:+.2f} after a {hit:.0f}pt hit" if hit else "   (no hit)"),
+        "```",
+    ]
+    if entering or leaving:
+        lines.append(
+            f"Changes the XI: **{', '.join(sorted(entering)) or 'nobody'}** in, "
+            f"**{', '.join(sorted(leaving)) or 'nobody'}** out."
+        )
+    lines.append(
+        "The horizon margin behind a transfer is measurably overstated — a fit of realised on "
+        "forecast gain across 111 decisions gives a slope of 0.436, stable in every season. "
+        "Treat a small positive as closer to zero than it reads."
+    )
+    return lines
+
+
 def build_report(
     forecasts: pd.DataFrame,
     solution,
@@ -126,23 +205,34 @@ def build_report(
     chip_values: dict | None = None,
     risers: pd.DataFrame | None = None,
     fallers: pd.DataFrame | None = None,
+    current_squad: pd.DataFrame | None = None,
+    rules: dict | None = None,
+    move: tuple | None = None,
 ) -> str:
-    """Assemble the brief as markdown."""
+    """Assemble the brief as markdown.
+
+    `current_squad` and `move` are supplied by `myteam`, where a transfer plan exists and the
+    XI below is the one you would field AFTER taking it. `report` solves an ideal fifteen from
+    scratch, has no "before", and passes neither.
+    """
     squad_ids = set(solution.squad["player_id"])
     order = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
     xi = solution.starting_xi.assign(_o=lambda d: d["position"].map(order)).sort_values(
         ["_o", "expected_points"], ascending=[True, False]
     )
 
-    lines = [
+    heading = "Starting XI" + (" — after the transfer" if move else "")
+    header = [
         f"# Gameweek {gw} brief",
         "",
         (f"**Squad cost** £{solution.total_cost:.1f}m  ·  "
          f"**expected points** {solution.expected_points:.1f}  ·  "
          f"**captain** {solution.captain.get('web_name', '?')} "
          f"(vice {solution.vice_captain.get('web_name', '?')})"),
+    ]
+    team_sheet = [
         "",
-        "## Starting XI",
+        f"## {heading}",
         "```",
         _fmt(xi, DISPLAY, rows=11),
         "```",
@@ -162,7 +252,17 @@ def build_report(
         "```",
     ]
 
-    lines += transfer_section(plan)
+    # `myteam` reads as a decision in the order you actually make it: what you hold, what to
+    # change, what that buys, then the team sheet to field. `report` has no "before" and keeps
+    # the plain ordering.
+    if current_squad is not None and rules is not None:
+        lines = header + current_team_section(current_squad, rules)
+        lines += transfer_section(plan)
+        if move is not None:
+            lines += move_section(*move[:2], plan, rules, *move[2:])
+        lines += team_sheet
+    else:
+        lines = header + team_sheet + transfer_section(plan)
     lines += chip_section(chip, chip_reason, chip_values)
 
     risky = bench_risk(forecasts, squad_ids)

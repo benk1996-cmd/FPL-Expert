@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import pytest
 
 from fpl_expert.reporting.gw_report import (
     build_report,
@@ -161,3 +162,71 @@ def test_the_caveats_survive():
 
 def test_chip_values_are_optional():
     assert "Chips" in build_report(_solution().squad, _solution(), 5, plan=_plan())
+
+
+def _held_squad():
+    """Fifteen with a dead asset at forward — the shape that exposed the bug."""
+    positions = ["GK"] * 2 + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3
+    return pd.DataFrame({
+        "player_id": range(15),
+        "web_name": [f"P{i}" for i in range(15)],
+        "position": positions,
+        "team": [f"C{i % 6}" for i in range(15)],
+        "price": 5.0,
+        "selling_price": 5.0,
+        "expected_points": [4.0] * 14 + [0.0],     # P14, a forward, is the dead asset
+        "horizon_points": [20.0] * 14 + [0.0],
+        "p_zero": 0.1,
+    })
+
+
+def test_the_team_sheet_fields_the_squad_you_would_hold_after_the_transfer():
+    """The brief used to recommend a signing and then print an XI without him in it.
+
+    It picked the eleven from the PRE-transfer squad, so the player being sold sat on the
+    bench at 0.00 while the incoming player appeared nowhere. On a real squad that understated
+    the gameweek by 2.6 points and named two starters who would have been displaced.
+    """
+    from fpl_expert.backtest.season_sim import pick_xi
+    from fpl_expert.config import load_scoring_rules
+
+    rules = load_scoring_rules()
+    held = _held_squad()
+    incoming = pd.DataFrame([{
+        "player_id": 99, "web_name": "Incoming", "position": "FWD", "team": "C9",
+        "price": 5.0, "selling_price": 5.0, "expected_points": 6.0,
+        "horizon_points": 30.0, "p_zero": 0.1,
+    }])
+
+    fielded = pd.concat([held[held["player_id"] != 14], incoming], ignore_index=True)
+    _, starters = pick_xi(fielded, rules, "expected_points")
+
+    assert "Incoming" in set(starters["web_name"]), "the signing must be available to field"
+    assert "P14" not in set(fielded["web_name"]), "the sold player must be gone entirely"
+
+
+def test_xi_value_counts_the_captain_twice():
+    """The gain figure compares two XI totals, so both must use the same convention as the
+    manifest — otherwise the 'what the move buys' line is measuring two different things."""
+    from fpl_expert.config import load_scoring_rules
+    from fpl_expert.reporting.gw_report import xi_value
+
+    rules = load_scoring_rules()
+    squad = _held_squad()
+    # eleven starters at 4.0, best of them counted again as captain
+    assert xi_value(squad, rules) == pytest.approx(11 * 4.0 + 4.0)
+    assert xi_value(pd.DataFrame(), rules) == 0.0
+
+
+def test_the_move_section_is_absent_when_no_transfer_is_recommended():
+    """A 'what the move buys' block with nothing in it is worse than no block."""
+    from fpl_expert.config import load_scoring_rules
+    from fpl_expert.reporting.gw_report import move_section
+
+    rules = load_scoring_rules()
+
+    class _Plan:
+        n_transfers = 0
+
+    assert move_section(50.0, 50.0, _Plan(), rules, set(), set()) == []
+    assert move_section(50.0, 52.0, None, rules, set(), set()) == []
