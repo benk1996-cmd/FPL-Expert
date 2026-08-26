@@ -125,14 +125,13 @@ def test_weights_never_exceed_one_however_bad_the_squad():
     assert max(autosub_slot_weights(np.linspace(0.5, 1.0, 10), n_slots=3)) <= 1.0
 
 
-def test_the_live_path_is_bench_aware_by_default_and_the_backtest_is_not():
-    """A deliberate, recorded divergence — not an oversight.
+def test_bench_aware_is_off_everywhere_because_the_ensemble_rejected_it():
+    """Measured 2026-08-26 and NOT adoptable: -126 / -65 / +98, pooled -31 [-70, +8].
 
-    `analyse_entry` defaults ON so `fpl myteam` stops taking hits for bench upgrades.
-    `simulate_season` defaults OFF because every backtested number in DECISIONS was measured
-    under the sum-of-fifteen policy, and flipping it would silently invalidate them. This test
-    pins both so the gap cannot close by accident in either direction — it must be closed by
-    running the `bench_aware` ensemble variant and deciding.
+    It loses 10 of 10 paths in 2023-24. The mechanism is sound — `select_squad` already
+    discounts the bench, so valuing it at 1.0 in the transfer MILP was inconsistent — and it
+    still made things worse, which is ground rule 3 for the seventh time. The live path and the
+    backtest must agree, so that `fpl myteam` runs the policy the +399 headline describes.
     """
     import inspect
 
@@ -140,7 +139,7 @@ def test_the_live_path_is_bench_aware_by_default_and_the_backtest_is_not():
     from fpl_expert.backtest.season_sim import simulate_season
     from fpl_expert.cli import ENSEMBLE_VARIANTS
 
-    assert inspect.signature(analyse_entry).parameters["bench_aware"].default is True
+    assert inspect.signature(analyse_entry).parameters["bench_aware"].default is False
     assert inspect.signature(simulate_season).parameters["bench_aware"].default is False
     assert ENSEMBLE_VARIANTS["bench_aware"] == {"bench_aware": True}
 

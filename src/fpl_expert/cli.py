@@ -969,7 +969,7 @@ def myteam(
     horizon: int = typer.Option(None, "--horizon", help="Gameweeks to plan over"),
     max_transfers: int = typer.Option(2, "--max-transfers"),
     bench_aware: bool = typer.Option(
-        True, "--bench-aware/--no-bench-aware",
+        False, "--bench-aware/--no-bench-aware",
         help="Value bench places by autosub odds rather than as starting places.",
     ),
     brief: str = typer.Option(

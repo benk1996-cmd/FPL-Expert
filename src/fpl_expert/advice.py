@@ -58,15 +58,15 @@ def analyse_entry(
     gw: int | None = None,
     span: int | None = None,
     max_transfers: int = 2,
-    bench_aware: bool = True,
+    bench_aware: bool = False,
 ) -> EntryAdvice:
     """Pull a real squad and work out what to do with it for the coming gameweek.
 
     `bench_aware` judges each plan on the XI plus autosub-weighted bench rather than the sum of
-    fifteen, so a hit is not taken to upgrade a player who never starts. **On here and off in
-    `simulate_season`**, which means the live policy is no longer the one the +399 headline was
-    measured under. That gap is deliberate and temporary: it closes when the ensemble resolves
-    the default. See NEXT_SESSION.
+    fifteen. It was ON here for two days and is now OFF: the ensemble measured it at
+    **-126 / -65 / +98** across three seasons, pooled -31 [-70, +8], losing 10 of 10 paths in
+    2023-24. Off matches `simulate_season`, so the live policy is again the one the +399
+    headline was measured under. Pass `--bench-aware` to reproduce the variant.
 
     Raises `MissingSnapshotError` when no pre-deadline snapshot exists for `gw` — the target
     gameweek is read through the strict point-in-time accessor deliberately, so the fix is to

@@ -1430,6 +1430,52 @@ understated this system by roughly 550 points a season for months. And the horiz
 gap is unchanged at +11 +/- 28 — **both** beat form comfortably, so the value is in the
 forecasts, not in the multi-week optimisation built over them.
 
+## Bench-aware transfer valuation (2026-08-26) — mechanism sound, REJECTED
+
+`recommend_transfers` had no concept of a starting XI: it maximised the change in the SUM of
+fifteen players' points, so a fourth-choice defender counted exactly as much as the captain.
+`select_squad` meanwhile discounted a bench place at a flat, guessed `DEFAULT_BENCH_WEIGHT =
+0.10`. The two optimisers priced the same squad differently and only one could be right.
+
+`optimise/bench.py` derives the number instead of guessing it. A bench player scores when an
+autosub fires, and an autosub fires when a STARTER blanks, so slot k is worth P(at least k
+starters blank) — the survival function of a Poisson-binomial over the XI's `p_zero`, computed
+exactly by convolution. On a live squad that is **0.82 / 0.48 / 0.19**, not a flat 0.10: the
+first bench slot is reached most weeks and was under-valued eightfold.
+
+Squad value cannot be a MILP objective, because it depends on which eleven the post-transfer
+squad would field — itself an optimisation over the solution. So the solver proposes the best
+plan at each transfer count and those few are rescored exactly. Solve-once, rescore-many.
+
+    variant       mean_diff    se     95% CI        wins   signs      adoptable
+    bench_aware       -31.0  19.8  [-70, +8]        0.40   - - +          no
+
+    per season      mean_diff    se        95% CI          wins  paths
+    2023-24            -126.1   1.9  [-129.7, -122.5]      0.00     10
+    2024-25             -64.8  25.3  [-114.3,  -15.3]      0.30     10
+    2025-26             +98.0  13.4  [ +71.7, +124.3]      0.90     10
+
+Paired within each shared path, baseline `horizon` — one knob moved, so the result is not
+confounded with the unresolved horizon-vs-myopic difference.
+
+**Rejected on both criteria.** The pooled interval spans zero AND the sign flips. Note the
+per-season intervals are individually TIGHT and exclude zero in opposite directions: this is
+not one noisy measurement but three confident ones that disagree, which is precisely what
+ground rule 2 exists to catch. A pooled reading alone would have called it "unresolved".
+
+That is the seventh principled correction of a measured inconsistency to produce nothing or
+worse, after bonus match-allocation, ownership calibration, rank-aware captaincy, defcon
+overdispersion, the transfer hit bar, and the team minutes budget. Ground rule 3 holds.
+
+`bench_aware` was ON in the live path for two days (2026-08-24 to 26) and is now OFF
+everywhere, so `fpl myteam` again runs the policy the +399 headline describes. The code and the
+`bench_aware` ensemble variant are kept so the measurement can be repeated, not because the
+default is close.
+
+**What is NOT tested here.** This measures the TRANSFER path only. `select_squad`'s flat 0.10
+is untouched, so the autosub weights have never been tried where a squad is built from scratch
+— which is the case where the guess is least defensible.
+
 ## Decision-layer parameter sweep (2026-08-13) — nine variants, NOTHING adoptable
 
 The first sweep run on an instrument capable of resolving it: 9 variants x 3 seasons x 10
