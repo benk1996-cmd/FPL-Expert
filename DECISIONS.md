@@ -1430,6 +1430,156 @@ understated this system by roughly 550 points a season for months. And the horiz
 gap is unchanged at +11 +/- 28 — **both** beat form comfortably, so the value is in the
 forecasts, not in the multi-week optimisation built over them.
 
+## The 2x2, completed (2026-08-28) — deferral is the value, inlining is a season lottery
+
+Four combinations of the two corrections, each paired against `horizon` within shared paths.
+
+                             no deferral        with deferral
+    sum-of-fifteen           0   (baseline)     +60.1  [+20.5, +99.8]
+    XI inlined in the MILP  +2.8 [-36.3, +42]   +35.7  [-12.0, +83.5]
+
+    per season          2023-24     2024-25     2025-26
+    defer_aware           -41.2      +197.2       +24.4
+    joint_greedy         -129.3       +26.8      +111.0
+    joint (both)         -135.1      +134.8      +107.5
+
+**The inference this run was built to test was wrong.** Inlining is not simply the harmful
+half: alone it is +2.8, indistinguishable from zero. But that pooled number is an average of
+**-129 / +27 / +111** — the widest per-season spread anything in this project has produced. It
+is not neutral, it is violently season-dependent, and the near-zero mean hides that completely.
+
+**The two corrections interfere.** If they composed, both together would be near +63. They
+measure +35.7. Something in the region of -27 is lost to interaction, and the mechanism is
+visible: inlining sets bench value to exactly zero, which changes WHICH plans the solver
+proposes, and the deferral rule then evaluates tempo on a different and worse shortlist.
+
+**2023-24 is an inlining problem, not a deferral problem.** Decomposed: deferral costs -41
+there, inlining costs -129, both together -135. Three corrections all failing on that season
+looked like a property of the season; it is mostly one component failing, twice.
+
+**Deferral is the only component with a positive pooled interval excluding zero** (+60.1). It
+still flips sign and is still not adoptable, but it is the piece worth returning to, and the
+bilevel reformulation — the more elegant and more expensive fix — is the piece to leave alone.
+
+**Leading explanation for inlining's harm, measured but not confirmed as causal.** With bench
+value at zero the solver has no reason to spend on the bench: bench outlay drops ~GBP 2m in all
+three seasons (19.2->17.3, 18.1->17.1, 19.4->17.4) while XI outlay is flat or lower, so roughly
+GBP 2m sits unused in the bank. The transfer solver moves two players a week and cannot
+redeploy it. Auto-substitutions were the other candidate and are REFUTED: missed autosubs are
+0.32 against 0.32 in the season where the joint model loses worst.
+
+Everything stays OFF. All four cells are registered as ensemble variants so the grid can be
+re-run whenever the instrument changes.
+
+## The bilevel reformulation (2026-08-28) — correct, complete, and WORSE. Rejected.
+
+`recommend_transfers` sums all FIFTEEN players because a MILP needs a fixed coefficient per
+variable, and a player's contribution is not fixed: he is worth 4.5 if he starts and near
+nothing if he does not, and whether he starts depends on who else was bought. That is a bilevel
+program — an optimisation whose objective contains an optimisation.
+
+It collapses to one level. The nesting is max-inside-max and the inner constraints touch the
+outer variables only through "you may field only who you own", so `start[p][k]` can live in the
+same problem. `select_squad` has always done this for one gameweek; `optimise/joint.py` extends
+it across the horizon. **`bench_weight` disappears as a concept** — no flat 0.10, no autosub
+weighting — because a bench place is worth exactly the weeks the solver chooses to field him.
+
+**Solve time was never the obstacle.** 8,008 binaries, Optimal in 1.4s at full pool; 0.5s
+pruned to 40 per position. One backtested season in 26s, a full ensemble in 0.4h. The earlier
+worry about CBC thrashing was wrong.
+
+    variant       mean_diff    se     95% CI       wins   signs   excludes_zero  adoptable
+    joint             +35.7  24.4  [-12.0, +83.5]  0.67   - + +       False         no
+    defer_aware       +60.1  20.2  [+20.5, +99.8]  0.63   - + +       True          no
+
+    per season      mean_diff    se        95% CI        wins  paths   sd
+    2023-24            -135.1  24.3  [-182.8,  -87.4]    0.00     10   75.5
+    2024-25            +134.8  10.3  [+114.6, +155.0]    1.00     10   36.1
+    2025-26            +107.5  11.6  [ +84.7, +130.3]    1.00     10   18.1
+
+**The complete model is worse than the half-fix it was meant to finish.** The pooled interval
+now includes zero where `defer_aware`'s excluded it, and 2023-24 fell from -41 to -135. It is
+also far less stable: sd 75.5 against the baseline's 5.8 in that season, thirteen times the
+path sensitivity. A policy that swings that far on a 0.1% forecast perturbation is fragile
+whatever its mean.
+
+**A single replay of 2023-24 gave 2510 against the baseline's 2497** and was reported here as
+encouraging before the ensemble ran. The ensemble mean for that season is 2216.1 — the replay
+was ~300 points off the distribution it came from. Ground rule 1, demonstrated as starkly as
+anywhere in this project's history.
+
+**Hypothesis for why, untested.** With XI selection inlined, bench value in the objective is
+exactly zero, so the rational play is four pieces of cheap fodder and everything spent on the
+eleven. That is a real strategy and a fragile one — and auto-substitutions are NOT modelled in
+the simulator, so the cost of a threadbare bench is represented inconsistently. Confirming this
+means comparing bench spend and bench minutes between the arms. Not done.
+
+**The pattern now worth chasing is not a fourth correction.** Three independent mechanisms have
+been tested and all three lose on 2023-24 and only 2023-24: bench_aware -126, defer_aware -41,
+joint -135. Three unrelated fixes failing in the same season is not coincidence. Diagnose the
+season before building anything else.
+
+Everything stays OFF. `joint.py` is kept and tested so the measurement can be repeated.
+
+**Two known defects in the kept code**, neither material while it is off: `solve_joint` returns
+the ABSOLUTE objective as `gain` where every other plan reports a delta against doing nothing,
+so a summary line would be nonsense; and the backtest ran with `pool_per_position=40`, an
+approximation that would need lifting before any adoption.
+
+## Deferral-aware hits (2026-08-26) — the strongest candidate yet, still NOT adoptable
+
+`recommend_transfers` has no concept of next week's free transfer. It compares "N transfers
+now, paying hits" against "fewer now, and never make the rest", when the real alternative is
+"fewer now, the rest next week for nothing". A hit is one-off while the horizon gain is a
+six-week decayed sum, so almost any upgrade clears a nominal 4.
+
+**Demonstrated on a live squad.** With `max_transfers` lifted, the policy takes SEVEN transfers
+and six hits (-24 points) in a single gameweek, converging on the `fpl squad` ideal fifteen and
+scoring it +34. Only the cap prevents it, and a CLI default is not an economic argument.
+
+The correction is structural rather than a tuned bar. Comparing "take now" against "defer one
+week" cancels every later gameweek, because both branches hold an identical squad from then on.
+What survives is:
+
+    take the hit iff (this gameweek's XI gain from the extra transfers) > the hit
+
+so a hit is judged on the tempo it actually buys. On the live squad it makes the answer
+independent of `max_transfers` (1 transfer at caps of 2, 4 and 15), which is the property that
+says the mechanism is right rather than merely tuned.
+
+    variant       mean_diff    se     95% CI       wins   signs   excludes_zero  adoptable
+    defer_aware       +60.1  20.2  [+20.5, +99.8]  0.63   - + +        True         no
+
+    per season      mean_diff    se        95% CI        wins  paths
+    2023-24             -41.2   1.8  [ -44.8,  -37.6]    0.00     10
+    2024-25            +197.2  22.4  [+153.3, +241.1]    1.00     10
+    2025-26             +24.4   9.1  [  +6.6,  +42.2]    0.90     10
+
+**This is the best result any decision-layer variant has produced.** The pooled interval
+excludes zero on the positive side, the mean is large, and two seasons are strongly positive —
+2024-25 by nearly 200 points at a 1.00 win rate. Nothing in the 2026-08-13 sweep came close.
+
+**It is still rejected, on ground rule 2.** 2023-24 measures -41.2 with a standard error of 1.8
+and loses 0 of 10 paths. That is not noise; it is a confident negative. Adopting on the pooled
+mean would be exactly the error the ground rule exists to prevent, and this project has been
+burned by it before — the horizon lookahead was persuasive precisely because it was positive in
+all four seasons, and that uniformity turned out to be a shared bug.
+
+**What this measurement does NOT cover.** `simulate_season` runs `max_transfers=2`, so the
+seven-transfer churn never occurs in the backtest. Only the "refuse the marginal hit" half of
+the fix is being measured; the "do not churn to the ideal squad" half is latent because the cap
+already suppresses it. The live path is capped at 2 as well, so the figure above is the honest
+one for current settings — but it means the variant is being judged on its smaller half.
+
+**Worth investigating before this is re-opened:** why 2023-24 loses. It is the season with the
+highest baseline (2351) and the tightest spread (sd 5.8), and `defer_aware` collapses the path
+variance to 0.0 there — every path returns 2310.0. Fewer transfers means fewer branch points,
+so the policy is markedly more deterministic. Whether that stability is worth anything is a
+separate question from whether the sign flip is explicable.
+
+Default stays OFF in `analyse_entry` and `simulate_season`. The `defer_aware` ensemble variant
+is registered so the measurement repeats.
+
 ## Bench-aware transfer valuation (2026-08-26) — mechanism sound, REJECTED
 
 `recommend_transfers` had no concept of a starting XI: it maximised the change in the SUM of

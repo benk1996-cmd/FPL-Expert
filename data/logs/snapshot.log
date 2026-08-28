@@ -89,3 +89,42 @@ GW2 deadline is 55.5h away (earliest checkpoint 48.0h)
 GW2 deadline is 54.5h away (earliest checkpoint 48.0h)
 GW2 deadline is 53.5h away (earliest checkpoint 48.0h)
 GW2 deadline is 52.5h away (earliest checkpoint 48.0h)
+GW2 deadline is 51.5h away (earliest checkpoint 48.0h)
+GW2 deadline in 27.5h — capturing for the 48.0h checkpoint
+22:00:05 INFO    fpl_expert.data.snapshot | snapshot 20260827T140002Z: GW2, 27.50h to deadline, before_deadline=True
+  stamp                  20260827T140002Z
+  target_gw              2
+  deadline               2026-08-28T17:30:00+00:00
+  taken_before_deadline  True
+  hours_to_deadline      27.5
+  players                614
+  fixtures               380
+  odds_rows              0
+GW2: already hold a snapshot inside the 48.0h checkpoint
+GW2: already hold a snapshot inside the 48.0h checkpoint
+GW2: already hold a snapshot inside the 48.0h checkpoint
+GW2 deadline in 23.5h — capturing for the 24.0h checkpoint
+02:00:06 INFO    fpl_expert.data.snapshot | snapshot 20260827T180002Z: GW2, 23.50h to deadline, before_deadline=True
+  stamp                  20260827T180002Z
+  target_gw              2
+  deadline               2026-08-28T17:30:00+00:00
+  taken_before_deadline  True
+  hours_to_deadline      23.5
+  players                616
+  fixtures               380
+  odds_rows              0
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2: already hold a snapshot inside the 24.0h checkpoint

@@ -184,6 +184,9 @@ def recommend_transfers(
     points_col: str = "horizon_points",
     rules: dict | None = None,
     bench_aware: bool = False,
+    defer_aware: bool = False,
+    per_gw: dict | None = None,
+    decay: float = 0.84,
 ) -> TransferPlan:
     """Choose the transfers worth making, if any.
 
@@ -199,24 +202,56 @@ def recommend_transfers(
     solution. So the MILP proposes the best plan AT each transfer count and those few plans are
     rescored exactly. Solve-once, rescore-many — the same shape as the season simulator.
 
-    **Off by default and not yet measured.** It corrects a real inconsistency (`select_squad`
-    already discounts the bench, at a flat guessed 0.10) but this project has watched six
-    principled corrections measure to nothing, and a change to the transfer policy needs the
-    ensemble to resolve. See ground rule 3.
+    **`bench_aware` is off by default and stays off** — the ensemble measured it at
+    -126 / -65 / +98 across three seasons and rejected it. See DECISIONS (2026-08-26).
+
+    `defer_aware` fixes a different and more basic error: **the optimiser has no concept of
+    next week's free transfer.** It compares "N transfers now, paying hits" against "fewer
+    transfers now, and never make the rest", when the real alternative is "fewer now, the rest
+    next week for nothing". Because a hit is one-off and the horizon gain is a six-week sum,
+    almost any upgrade clears a nominal 4 — so with the `max_transfers` cap lifted the policy
+    takes SEVEN transfers and six hits to reach the ideal fifteen in one week, and scores that
+    as a gain. Only the cap prevents it, and a cap is not a reason.
+
+    The correction is structural, not a tuned bar. If a transfer can be made next week for
+    free, taking it now buys exactly one gameweek of its edge — so a hit must be justified by
+    the CURRENT gameweek's improvement, not by the whole horizon. Formally, comparing "take now"
+    against "defer one week" cancels every later gameweek and leaves
+
+        take now iff  (this gameweek's XI gain from the extra transfers)  >  the hit
+
+    Off by default until the ensemble resolves it. Turning `bench_aware` on before measuring it
+    was a mistake once already this week.
     """
     common = {
         "bank": bank, "free_transfers": free_transfers, "max_per_club": max_per_club,
         "squad_quota": squad_quota, "hit_cost": hit_cost, "points_col": points_col,
     }
-    if bench_aware and rules is None:
+    if (bench_aware or defer_aware) and rules is None:
         # Ground rule 7: a fallback that changes the model must say so. Silently reverting to
-        # the sum-of-fifteen here would hand back a plan the caller believes was bench-aware.
+        # the plain objective would hand back a plan the caller believes was corrected.
         log.warning(
-            "bench_aware=True but no `rules` given — cannot pick an XI, so falling back to the "
-            "sum-of-fifteen objective. Pass rules=load_scoring_rules() to enable it."
+            "bench_aware/defer_aware set but no `rules` given — cannot pick an XI, so falling "
+            "back to the sum-of-fifteen objective. Pass rules=load_scoring_rules()."
         )
-    if not bench_aware or rules is None:
+    if rules is None or not (bench_aware or defer_aware):
         return _solve_transfers(squad, candidates, max_transfers=max_transfers, **common)
+
+    if defer_aware and per_gw:
+        # The consistent form: both halves at once. `defer_aware` alone still carried a
+        # sum-of-fifteen horizon; `bench_aware` alone still compared a horizon against an
+        # unmultiplied hit. Each fixed one inconsistency and kept the other.
+        return _consistent_plan(
+            squad, candidates, rules=rules, per_gw=per_gw, decay=decay,
+            max_transfers=max_transfers, free_transfers=free_transfers, common=common,
+        )
+
+    if defer_aware:
+        return _defer_aware_plan(
+            squad, candidates, rules=rules, max_transfers=max_transfers,
+            free_transfers=free_transfers, hit_cost=hit_cost, points_col=points_col,
+            common=common,
+        )
 
     from .bench import squad_value
 
@@ -229,7 +264,9 @@ def recommend_transfers(
             plan = _solve_transfers(
                 squad, candidates, max_transfers=max_transfers, exact_transfers=n, **common
             )
-        except ValueError:
+        except (ValueError, RuntimeError):
+            # Infeasible AT THIS SIZE — no legal way to make exactly n transfers within the
+            # budget, quota and club limits. That is a gap in the ladder, not a failure.
             continue
         if plan.n_transfers != n:
             continue                      # infeasible at this size; CBC returned nothing
@@ -253,6 +290,104 @@ def recommend_transfers(
                  "squad_value_before": before, "candidates": len(pool)}
     log.info("bench-aware rescoring: %s", scored)
     return best
+
+
+def _consistent_plan(
+    squad, candidates, *, rules, per_gw, decay, max_transfers, free_transfers, common
+):
+    """Judge every plan on one quantity, in one set of units.
+
+    Squads are valued by `horizon_xi_value` — the decayed sum of the ELEVEN they would field
+    each week — and a hit is charged against the weeks it actually buys, because the deferred
+    branch converges to the same squad once its free transfers arrive.
+    """
+    from .valuation import deferral_gap, horizon_xi_value
+
+    free_cap = max(0, min(free_transfers, max_transfers))
+    baseline = _solve_transfers(squad, candidates, max_transfers=free_cap, **common)
+    after_free = _apply(squad, baseline)
+
+    best, best_advantage, considered = baseline, 0.0, [{
+        "n": baseline.n_transfers, "hits": 0.0, "tempo": 0.0, "advantage": 0.0,
+        "horizon_xi": horizon_xi_value(after_free, per_gw, rules, decay=decay),
+    }]
+    for n in range(free_cap + 1, max_transfers + 1):
+        try:
+            plan = _solve_transfers(
+                squad, candidates, max_transfers=max_transfers, exact_transfers=n, **common
+            )
+        except (ValueError, RuntimeError):
+            continue
+        if plan.n_transfers != n:
+            continue
+        after = _apply(squad, plan)
+        weeks = max(1, plan.hits)
+        tempo = deferral_gap(after, after_free, per_gw, rules, weeks=weeks, decay=decay)
+        advantage = tempo - plan.hit_cost
+        considered.append({
+            "n": n, "hits": plan.hit_cost, "tempo": tempo, "advantage": advantage,
+            "horizon_xi": horizon_xi_value(after, per_gw, rules, decay=decay),
+        })
+        if advantage > best_advantage:
+            best, best_advantage = plan, advantage
+
+    best.meta = {**best.meta, "consistent": True, "considered": considered}
+    log.info("consistent valuation: %s", considered)
+    return best
+
+
+def _defer_aware_plan(
+    squad, candidates, *, rules, max_transfers, free_transfers, hit_cost, points_col, common
+):
+    """Take a hit only when it buys enough THIS gameweek to beat making the move next week.
+
+    The free-transfer plan is the baseline, because it costs nothing and is always available.
+    Any plan beyond it is judged on the single thing a hit actually buys — tempo — which is the
+    improvement to this week's XI, since every later gameweek is identical either way.
+    """
+    from .bench import xi_value
+
+    free_cap = max(0, min(free_transfers, max_transfers))
+    baseline = _solve_transfers(squad, candidates, max_transfers=free_cap, **common)
+    after_free = _apply(squad, baseline)
+    free_value = xi_value(after_free, rules)
+
+    best, best_advantage, considered = baseline, 0.0, [
+        {"n": baseline.n_transfers, "hits": 0.0, "immediate_edge": 0.0, "advantage": 0.0}
+    ]
+    for n in range(free_cap + 1, max_transfers + 1):
+        try:
+            plan = _solve_transfers(
+                squad, candidates, max_transfers=max_transfers, exact_transfers=n, **common
+            )
+        except (ValueError, RuntimeError):
+            # Infeasible AT THIS SIZE — no legal way to make exactly n transfers within the
+            # budget, quota and club limits. That is a gap in the ladder, not a failure.
+            continue
+        if plan.n_transfers != n:
+            continue
+        edge = xi_value(_apply(squad, plan), rules) - free_value
+        advantage = edge - plan.hit_cost
+        considered.append(
+            {"n": n, "hits": plan.hit_cost, "immediate_edge": edge, "advantage": advantage}
+        )
+        if advantage > best_advantage:
+            best, best_advantage = plan, advantage
+
+    best.meta = {
+        **best.meta, "defer_aware": True, "considered": considered,
+        "free_plan_transfers": baseline.n_transfers,
+    }
+    log.info("defer-aware: %s", considered)
+    return best
+
+
+def _apply(squad: pd.DataFrame, plan) -> pd.DataFrame:
+    """The fifteen you would hold after `plan`."""
+    if plan is None or not plan.n_transfers:
+        return squad
+    kept = squad[~squad["player_id"].isin(plan.transfers_out["player_id"])]
+    return pd.concat([kept, plan.transfers_in], ignore_index=True)
 
 
 def horizon_points(

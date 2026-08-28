@@ -236,3 +236,108 @@ def test_an_opening_player_with_no_known_start_price_is_omitted_not_zeroed():
 
     assert paid == {1: 80}
     assert 2 not in paid
+
+
+# --- deferral: a hit buys tempo, not the whole horizon ---------------------
+
+
+def _deferral_squad():
+    positions = ["GK"] * 2 + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3
+    return pd.DataFrame({
+        "player_id": range(15),
+        "web_name": [f"P{i}" for i in range(15)],
+        "position": positions,
+        "team": [f"C{i % 6}" for i in range(15)],
+        "price": 5.0, "selling_price": 5.0,
+        "expected_points": 3.0,
+        "horizon_points": 15.0,
+        "p_zero": 0.1,
+    })
+
+
+def _upgrades(n, immediate, horizon):
+    """Replacements that are much better over the horizon but only slightly better this week."""
+    return pd.DataFrame({
+        "player_id": range(100, 100 + n),
+        "web_name": [f"U{i}" for i in range(n)],
+        "position": ["DEF"] * n,
+        "team": [f"D{i}" for i in range(n)],
+        "price": 5.0, "selling_price": 5.0,
+        "expected_points": immediate,
+        "horizon_points": horizon,
+        "p_zero": 0.1,
+    })
+
+
+def test_without_deferral_the_policy_churns_to_the_ideal_squad_on_hits():
+    """The bug this exists to fix. A hit is one-off and the horizon gain is a six-week sum, so
+    almost any upgrade clears a nominal 4 — and only `max_transfers` stops the bleeding."""
+    squad = _deferral_squad()
+    plan = recommend_transfers(
+        squad, pd.concat([squad, _upgrades(5, 3.4, 40.0)], ignore_index=True),
+        bank=0.0, free_transfers=1, max_transfers=5,
+    )
+    assert plan.n_transfers == 5      # takes four hits, -16 points, to buy horizon value
+    assert plan.hits == 4
+
+
+def test_deferral_takes_a_hit_only_when_this_gameweek_justifies_it():
+    """If the move can be made next week for free, taking it now buys ONE gameweek of edge."""
+    from fpl_expert.config import load_scoring_rules
+
+    rules = load_scoring_rules()
+    squad = _deferral_squad()
+
+    # +0.4 a week is nowhere near a 4-point hit, however large the horizon number
+    patient = recommend_transfers(
+        squad, pd.concat([squad, _upgrades(5, 3.4, 40.0)], ignore_index=True),
+        bank=0.0, free_transfers=1, max_transfers=5, rules=rules, defer_aware=True,
+    )
+    assert patient.n_transfers == 1
+    assert patient.hits == 0
+
+    # a player worth +9 THIS week is worth paying 4 for, and deferral must not block it
+    urgent = recommend_transfers(
+        squad, pd.concat([squad, _upgrades(2, 12.0, 45.0)], ignore_index=True),
+        bank=0.0, free_transfers=1, max_transfers=2, rules=rules, defer_aware=True,
+    )
+    assert urgent.n_transfers == 2
+    assert urgent.hits == 1
+
+
+def test_deferral_makes_the_answer_independent_of_the_transfer_cap():
+    """`max_transfers` is a CLI default, not an economic limit. It should not set policy."""
+    from fpl_expert.config import load_scoring_rules
+
+    rules = load_scoring_rules()
+    squad = _deferral_squad()
+    candidates = pd.concat([squad, _upgrades(6, 3.4, 40.0)], ignore_index=True)
+
+    counts = {
+        cap: recommend_transfers(
+            squad, candidates, bank=0.0, free_transfers=1, max_transfers=cap,
+            rules=rules, defer_aware=True,
+        ).n_transfers
+        for cap in (2, 4, 6)
+    }
+    assert set(counts.values()) == {1}, counts
+
+
+def test_deferral_records_the_advantage_it_judged_each_plan_on(caplog):
+    """The summary must be reproducible from the numbers, not taken on trust."""
+    import logging
+
+    from fpl_expert.config import load_scoring_rules
+
+    rules = load_scoring_rules()
+    squad = _deferral_squad()
+    with caplog.at_level(logging.INFO):
+        plan = recommend_transfers(
+            squad, pd.concat([squad, _upgrades(3, 3.4, 40.0)], ignore_index=True),
+            bank=0.0, free_transfers=1, max_transfers=3, rules=rules, defer_aware=True,
+        )
+
+    considered = plan.meta["considered"]
+    assert [row["n"] for row in considered] == [1, 2, 3]
+    for row in considered[1:]:
+        assert row["advantage"] == pytest.approx(row["immediate_edge"] - row["hits"])

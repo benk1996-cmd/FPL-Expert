@@ -354,6 +354,10 @@ def simulate_season(
     smoothing: float = 0.0,
     hit_bar: float | None = None,
     bench_aware: bool = False,
+    defer_aware: bool = False,
+    consistent: bool = False,
+    joint: bool = False,
+    joint_greedy: bool = False,
 ) -> SeasonResult:
     """Replay a season: pick an opening squad, then one transfer a gameweek when worth it.
 
@@ -436,9 +440,20 @@ def simulate_season(
         if gw != gameweeks[0]:
             before = set(squad)
             if transfer_policy == "milp":
+                # The decision's own view of the weeks ahead. Built with `as_of=gw` so a
+                # transfer at GW12 is judged on GW12's forecast of GW17, never GW17's own —
+                # ground rule 9, the bug that cost 392 points a season.
+                window = None
+                if consistent or joint or joint_greedy:
+                    window = {
+                        g: frame_for(g, as_of=gw)
+                        for g in gameweeks
+                        if gw <= g < gw + (horizon or 6)
+                    }
                 squad, bank, transfers, hits, plan = _milp_transfer(
                     squad, bank, frame, rules, decision_col, free_transfers, max_transfers,
-                    purchase, hit_bar, bench_aware,
+                    purchase, hit_bar, bench_aware, defer_aware or consistent,
+                    window, decay, joint, joint_greedy,
                 )
                 if plan is not None:
                     moves = {
@@ -744,7 +759,8 @@ def selling_prices(held: pd.DataFrame, purchase: dict) -> pd.Series:
 
 
 def _milp_transfer(squad, bank, frame, rules, points_col, free_transfers, max_transfers,
-                   purchase=None, hit_bar=None, bench_aware=False):
+                   purchase=None, hit_bar=None, bench_aware=False, defer_aware=False,
+                   per_gw=None, decay=0.84, joint=False, joint_greedy=False):
     """Transfers chosen by the real optimiser rather than a single greedy swap.
 
     The greedy policy examines exactly one candidate move per gameweek and cannot express
@@ -767,12 +783,37 @@ def _milp_transfer(squad, bank, frame, rules, points_col, free_transfers, max_tr
         return squad, bank, 0, 0, None
 
     try:
+        if (joint or joint_greedy) and per_gw:
+            # `joint_greedy` is the missing cell of the 2x2: XI selection inlined in the MILP
+            # but NO deferral wrapper, so hits are still charged against a decayed horizon.
+            # Isolates which half of the combined model does the work.
+            from ..optimise.joint import solve_joint, solve_joint_deferred
+
+            solver = solve_joint_deferred if joint else solve_joint
+            plan = solver(
+                held, frame, per_gw, rules, bank=bank, free_transfers=free_transfers,
+                max_transfers=max_transfers, max_per_club=rules["squad"]["max_per_club"],
+                decay=decay, pool_per_position=40,
+            )
+            if plan.n_transfers == 0:
+                return squad, bank, 0, 0, None
+            sold = set(plan.transfers_out["player_id"])
+            bought = set(plan.transfers_in["player_id"])
+            for pid, price in zip(
+                plan.transfers_in["player_id"], plan.transfers_in["price"], strict=True
+            ):
+                purchase[pid] = price
+            return (
+                (squad - sold) | bought, plan.bank_after,
+                plan.n_transfers, plan.hits, plan,
+            )
         plan = recommend_transfers(
             held, frame, bank=bank, free_transfers=free_transfers,
             max_per_club=rules["squad"]["max_per_club"],
             squad_quota=rules["squad"]["positions"],
             max_transfers=max_transfers, points_col=points_col,
-            rules=rules, bench_aware=bench_aware,
+            rules=rules, bench_aware=bench_aware, defer_aware=defer_aware,
+            per_gw=per_gw, decay=decay,
             **({} if hit_bar is None else {"hit_cost": hit_bar}),
         )
     except (RuntimeError, ValueError) as exc:

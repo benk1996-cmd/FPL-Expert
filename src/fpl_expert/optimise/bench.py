@@ -125,3 +125,19 @@ def squad_value(
         (bench_outfield[points_col].fillna(0).to_numpy() * np.asarray(weights)).sum()
     )
     return value
+
+
+def xi_value(squad: pd.DataFrame, rules: dict, points_col: str = "expected_points") -> float:
+    """This gameweek's score for a squad: the best legal XI plus the armband again.
+
+    The armband is counted twice because the captain scores twice — the same convention the
+    manifest and `SquadSolution.expected_points` use, so the two are comparable.
+    """
+    from ..backtest.season_sim import pick_xi
+
+    if squad.empty:
+        return 0.0
+    _, starters = pick_xi(squad, rules, points_col)
+    if starters.empty:
+        return 0.0
+    return float(starters[points_col].sum() + starters[points_col].max())

@@ -625,6 +625,24 @@ ENSEMBLE_VARIANTS: dict[str, dict] = {
     # ON in the live path since 2026-08-24 and OFF here until this measures — which is a real
     # divergence, not a formality: the +399 headline describes the sum-of-fifteen policy.
     "bench_aware": {"bench_aware": True},
+    # The optimiser cannot see next week's free transfer, so it pays hits for horizon value it
+    # could have had for nothing seven days later. With the cap lifted it takes SEVEN transfers
+    # and six hits to reach the ideal fifteen. This judges a hit on the tempo it actually buys.
+    "defer_aware": {"defer_aware": True},
+    # Both halves at once, in one set of units: squads valued by the decayed sum of the ELEVEN
+    # they field, and a hit charged only against the weeks it actually buys. `defer_aware`
+    # alone still carried a sum-of-fifteen horizon; `bench_aware` alone still compared a
+    # 4.05x-multiplied gain against an unmultiplied 4.
+    "consistent": {"consistent": True},
+    # The complete model: XI selection inlined in the MILP (so bench value cannot inflate a
+    # gain) AND hits charged only against the weeks they bring forward. Neither half alone
+    # changes the answer — `joint` still takes hits, `consistent` still ranks a shortlist built
+    # on the sum of fifteen.
+    "joint": {"joint": True},
+    # The 2x2's missing cell: the inlined-XI MILP with NO deferral wrapper. Deferral alone is
+    # +60.1 and deferral+inlining is +35.7, which implies the INLINING is the harmful half.
+    # This is the run that confirms or refutes that.
+    "joint_greedy": {"joint_greedy": True},
     # The bar the model has to clear. Decisions read `price_score`, so the perturbation lands
     # there too and the baseline explores its own decision paths on the same footing.
     #
@@ -974,6 +992,10 @@ def myteam(
         False, "--bench-aware/--no-bench-aware",
         help="Value bench places by autosub odds rather than as starting places.",
     ),
+    defer_aware: bool = typer.Option(
+        False, "--defer-aware/--no-defer-aware",
+        help="Judge a hit on THIS week's gain, since the move can be made free next week.",
+    ),
     brief: str = typer.Option(
         None, "--brief", help="Write a full markdown brief here (transfers, chips, prices)"
     ),
@@ -996,6 +1018,7 @@ def myteam(
 
     result = analyse_entry(
         entry, gw=gw, span=horizon, max_transfers=max_transfers, bench_aware=bench_aware,
+        defer_aware=defer_aware,
     )
     target, span, plan = result.gameweek, result.span, result.plan
     typer.echo(f"{result.team_name} — GW{target}, planning over {span} gameweek(s)")

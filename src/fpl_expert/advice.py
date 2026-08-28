@@ -42,6 +42,7 @@ class EntryAdvice:
     bank: float
     free_transfers: int
     profile: dict = field(default_factory=dict)
+    per_gw: dict = field(default_factory=dict)   # gameweek -> that week's forecasts
 
     @property
     def gw1_points(self) -> int | None:
@@ -59,6 +60,7 @@ def analyse_entry(
     span: int | None = None,
     max_transfers: int = 2,
     bench_aware: bool = False,
+    defer_aware: bool = False,
 ) -> EntryAdvice:
     """Pull a real squad and work out what to do with it for the coming gameweek.
 
@@ -67,6 +69,12 @@ def analyse_entry(
     **-126 / -65 / +98** across three seasons, pooled -31 [-70, +8], losing 10 of 10 paths in
     2023-24. Off matches `simulate_season`, so the live policy is again the one the +399
     headline was measured under. Pass `--bench-aware` to reproduce the variant.
+
+    `defer_aware` judges a hit on the CURRENT gameweek's gain, because the same move can
+    usually be made next week for a free transfer. Measured at **-41 / +197 / +24**, pooled
+    **+60 [+21, +100]** — the strongest decision-layer result this project has produced, and
+    still not adoptable: the sign flips, so ground rule 2 refuses it as a default. Exposed as
+    `--defer-aware` so the judgement can be made per decision rather than by the default alone.
 
     Raises `MissingSnapshotError` when no pre-deadline snapshot exists for `gw` — the target
     gameweek is read through the strict point-in-time accessor deliberately, so the fix is to
@@ -108,7 +116,8 @@ def analyse_entry(
     plan = recommend_transfers(
         held, latest, bank=in_bank, free_transfers=available,
         max_per_club=rules["squad"]["max_per_club"], max_transfers=max_transfers,
-        rules=rules, bench_aware=bench_aware,
+        rules=rules, bench_aware=bench_aware, defer_aware=defer_aware,
+        per_gw=per_gw if defer_aware else None, decay=cfg.optimise.future_decay,
     )
 
     return EntryAdvice(
@@ -126,4 +135,5 @@ def analyse_entry(
         bank=in_bank,
         free_transfers=available,
         profile=profile,
+        per_gw=per_gw,
     )
