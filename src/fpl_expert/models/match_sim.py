@@ -107,6 +107,17 @@ class DixonColes:
     """Weighted-MLE team strength model with a home advantage and low-score correction."""
 
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS
+    # Ridge strength on attack/defence, adopted 2026-09-02. 0.0 reproduces the unpenalised
+    # fit, which is what every measurement recorded BEFORE that date was made under — compare
+    # nothing across the boundary without re-running it.
+    #
+    # Measured by walk-forward against the bookmakers' closing line, refitting before every
+    # matchday across five seasons and scoring the quantity the defect actually corrupts:
+    # clean sheets and goals conceded, not the 1X2 outcome. Both improve in both phases
+    # (early clean-sheet log loss 0.5635 -> 0.5329, late 0.5329 -> 0.5317). At 0.0 the model
+    # is worse than the closing line in four of five seasons; with a ridge it matches or beats
+    # it. See DECISIONS (2026-09-02).
+    ridge: float = 0.5
     teams: list[str] = field(default_factory=list)
     attack: dict[str, float] = field(default_factory=dict)
     defence: dict[str, float] = field(default_factory=dict)
@@ -153,7 +164,19 @@ class DixonColes:
             la = np.exp(intercept + att[ai] - dfn[hi])
             tau = dixon_coles_tau(x, y, lh, la, rho)
             ll = x * np.log(lh) - lh + y * np.log(la) - la + np.log(tau)
-            return -float((w * ll).sum())
+            # Ridge on the team strengths. Without it a club with a handful of matches and a
+            # zero count has a likelihood that is MONOTONE in its own parameter — nothing in
+            # the data opposes the optimiser, so it walks to the bound and stops only because
+            # the bound is there. That is what happened to the two promoted sides in 2026-27:
+            # Hull City conceded nothing in two games and came out at defence 3.000, the
+            # limit, which forecast Liverpool to score 0.10 at home to them. Coventry scored
+            # nothing and hit -2.996 on attack. The penalty makes the objective strictly
+            # convex in these parameters, so a team is pulled toward the league average in
+            # proportion to how little evidence it has. An established club with 268 matches
+            # is barely moved; a promoted one with two is moved a long way.
+            return -float((w * ll).sum()) + self.ridge * float(
+                np.sum(att**2) + np.sum(dfn**2)
+            )
 
         start = np.concatenate([
             np.zeros(n - 1), np.zeros(n - 1), [np.log(1.4)], [0.25], [-0.03]

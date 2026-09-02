@@ -39,6 +39,31 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def _target_gameweek(gw: int | None) -> int:
+    """The gameweek a forward-looking command should act on.
+
+    Three commands defaulted to `--gw 1`, so running any of them bare silently solved the
+    OPENING gameweek. It is not a harmless stale default: `forecast_gameweek` drops this
+    season's rows from the target onward to prevent lookahead, so asking for GW1 in September
+    discards the whole season and reverts every rate to prior years. `fpl squad` reported 38.3
+    expected points that way against 73.8 for the real gameweek, and the difference reads as a
+    broken model rather than a wrong argument.
+    """
+
+    if gw is not None:
+        return gw
+    from .data.snapshot import servable_gameweek
+
+    resolved = servable_gameweek()
+    if resolved is None:
+        raise typer.BadParameter(
+            "no pre-deadline snapshot exists, so there is no gameweek to act on — "
+            "run `fpl snapshot` before the deadline, or pass --gw explicitly"
+        )
+    typer.echo(f"using GW{resolved} (newest snapshotted gameweek)")
+    return resolved
+
+
 @app.command()
 def update(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
     """Pull the current season's core feeds from the FPL API."""
@@ -337,7 +362,7 @@ def _brief(path, latest, solution, gw, span, rules, plan=None, held=None,
 
 @app.command()
 def squad(
-    gw: int = typer.Option(1, "--gw"),
+    gw: int = typer.Option(None, "--gw", help="Defaults to the newest snapshotted gameweek"),
     budget: float = typer.Option(None, "--budget", help="Defaults to the configured 100.0"),
     bench_weight: float = typer.Option(0.10, "--bench-weight"),
     horizon: int = typer.Option(
@@ -371,6 +396,7 @@ def squad(
     from .pipeline import forecast_gameweek
 
     warnings.filterwarnings("ignore")
+    gw = _target_gameweek(gw)
     cfg, rules = load_config(), load_scoring_rules()
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
 
@@ -823,7 +849,7 @@ def repeat(
 
 @app.command()
 def report(
-    gw: int = typer.Option(1, "--gw"),
+    gw: int = typer.Option(None, "--gw", help="Defaults to the newest snapshotted gameweek"),
     horizon: int = typer.Option(None, "--horizon", help="Gameweeks to value over"),
     out: str = typer.Option(None, "--out", help="Write markdown here instead of stdout"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -847,6 +873,7 @@ def report(
     from .optimise.squad import select_squad
 
     warnings.filterwarnings("ignore")
+    gw = _target_gameweek(gw)
     cfg, rules = load_config(), load_scoring_rules()
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
 
@@ -890,23 +917,13 @@ def publish(
     import warnings
 
     from .config import load_config, load_scoring_rules, project_root
-    from .data.snapshot import servable_gameweek
     from .data.storage import read_table
     from .optimise.squad import select_squad
     from .serving import fixture_grid, write_bundle
 
     warnings.filterwarnings("ignore")
+    gw = _target_gameweek(gw)
     cfg, rules = load_config(), load_scoring_rules()
-    if gw is None:
-        # Previously this defaulted to 1, so a bare `fpl publish` silently rebuilt the bundle
-        # for the OPENING gameweek and the front end served eleven-day-old advice as current.
-        gw = servable_gameweek()
-        if gw is None:
-            raise typer.BadParameter(
-                "no pre-deadline snapshot exists, so there is no gameweek to publish for — "
-                "run `fpl snapshot` before the deadline, or pass --gw explicitly"
-            )
-        typer.echo(f"publishing for GW{gw} (newest snapshotted gameweek)")
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
     directory = Path(out) if out else project_root() / "data" / "serving"
 

@@ -10,20 +10,20 @@
   ],
   "horizon": 6,
   "points_col": "horizon_points",
-  "built_at": "2026-09-02T06:57:00+00:00",
+  "built_at": "2026-09-02T08:24:25+00:00",
   "players": 629,
   "variants": {
     "standard": {
-      "squad_cost": 100.0,
-      "expected_points": 79.13,
+      "squad_cost": 99.7,
+      "expected_points": 73.78,
       "captain": "Haaland",
-      "vice_captain": "Tzolakis"
+      "vice_captain": "Saka"
     }
   },
-  "squad_cost": 100.0,
-  "expected_points": 79.13,
+  "squad_cost": 99.7,
+  "expected_points": 73.78,
   "captain": "Haaland",
-  "vice_captain": "Tzolakis",
+  "vice_captain": "Saka",
   "has_prices": false,
   "has_fixtures": true
 }

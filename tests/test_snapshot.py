@@ -223,3 +223,23 @@ def test_a_post_deadline_capture_is_never_servable(tmp_config):
               stamp="20260904T180000Z")
 
     assert servable_gameweek() == 2
+
+
+def test_forward_looking_commands_never_default_to_gameweek_one(tmp_config):
+    """Three commands defaulted to `--gw 1`, so a bare run silently solved the OPENING week.
+
+    Not a harmless stale default: `forecast_gameweek` drops this season's rows from the target
+    onward to prevent lookahead, so asking for GW1 in September discards the entire season and
+    reverts every rate to prior years. `fpl squad` reported 38.3 expected points that way
+    against 73.8 for the real gameweek — a difference that reads as a broken model rather than
+    a wrong argument.
+    """
+    import inspect
+
+    from fpl_expert import cli
+
+    for name in ("squad", "report", "publish"):
+        default = inspect.signature(getattr(cli, name)).parameters["gw"].default
+        assert getattr(default, "default", default) is None, (
+            f"{name} must resolve its gameweek, not hardcode one"
+        )

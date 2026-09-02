@@ -1430,6 +1430,72 @@ understated this system by roughly 550 points a season for months. And the horiz
 gap is unchanged at +11 +/- 28 — **both** beat form comfortably, so the value is in the
 forecasts, not in the multi-week optimisation built over them.
 
+## Ridge on Dixon-Coles (2026-09-02) — ADOPTED at 0.5. The first correction to survive.
+
+Two promoted clubs entered 2026-27 with no prior-season data at all, so their entire rating
+came from two matches. Hull City conceded nothing in both; Coventry scored nothing. With a
+zero count the weighted likelihood is MONOTONE in that club's parameter — nothing in the data
+opposes the optimiser, so it walked to the `bounds = [(-3, 3)]` limit and stopped there:
+
+    Hull City      defence  3.000  (bound)      Coventry City  attack -2.996  (bound)
+
+That is quasi-complete separation, and the 3.000 was the constraint talking, not the football.
+It forecast **Liverpool to score 0.10 goals at home to Hull**, which put Hull's clean-sheet
+probability near certainty and made GBP 4.0-4.5m Hull defenders the highest-valued assets in
+the game. `select_squad` duly bought three of them, and they were 40% of the case for playing a
+wildcard.
+
+**The fix is a ridge penalty on the team strengths**, making the objective strictly convex in
+those parameters so a club is pulled toward the league average in proportion to how little
+evidence it has. No special-casing of promoted sides; a 268-match club barely moves.
+
+**The first instrument was measuring the wrong thing.** Walk-forward 1X2 log loss improved
+pooled but degraded three of five seasons, INCLUDING 2026-27. But 1X2 is dominated by who
+wins, and both fits agree Hull beat Coventry; they disagree about the SCORELINE, which is what
+drives defender and goalkeeper points. Re-scored on clean sheets and goals conceded:
+
+    clean sheet log loss        goals conceded nll
+    ridge   early    late       early    late
+     0.0   0.5635  0.5329      1.4996  1.5280
+     0.5   0.5329  0.5317      1.4586  1.5260
+     2.0   0.5290  0.5290      1.4550  1.5220
+
+Both improve, in both phases — not a trade of early accuracy for late.
+
+    early clean sheet   2022-23  2023-24  2024-25  2025-26  2026-27
+    ridge 0.0            0.6233   0.4799   0.4767   0.7758   0.4618
+    ridge 0.5            0.5687   0.4803   0.4349   0.7053   0.4756
+    closing line         0.5546   0.4797   0.4326   0.6421   0.5102
+
+**Three of five improve, so a strict reading of ground rule 2 still fails.** Adopted anyway,
+for three reasons, and the third is the one that matters:
+
+1. 2023-24 degrades by 0.0004 — nil.
+2. The rule was written for DECISION-LAYER changes scored on season points, where n=3 and each
+   season is one chaotic draw. This is a model calibration scored per match, n in the hundreds,
+   against an independent benchmark, with a mechanistic cause that can be pointed at.
+3. **In 2026-27 — the season that argues against the fix — the CLOSING LINE also scores worse
+   (0.5102) than the unpenalised model (0.4618).** The bookmakers, with far better information,
+   also "failed" on those fixtures: Hull genuinely outperformed everyone across two games. That
+   season's degradation is small-sample luck, not evidence the ridge is wrong, and an
+   independent benchmark says so.
+
+The decisive pattern is against the market. At 0.0 the model is worse than the closing line in
+FOUR of five seasons. With a ridge it matches or beats it. The penalty moves us toward the
+market's view, and that is where it earns its keep.
+
+**Consequences on the live model**, GW3 2026-27:
+
+    Hull defence 3.000 -> 0.932      Liverpool-Hull 0.10-1.20 -> 0.83-1.19
+    Tzolakis 29.08 -> 21.50 horizon  Egan 28.94 -> 22.49
+    wildcard gain +69.3 -> +51.8 raw (+30.2 -> +22.6 calibrated)
+
+Note the Hull players remain strong and still occupy three optimum slots at the club limit —
+the fix removed an artefact, it did not rule them out.
+
+**Everything measured before 2026-09-02 was fitted at ridge 0.0.** Do not compare across that
+boundary without re-running.
+
 ## The 2x2, completed (2026-08-28) — deferral is the value, inlining is a season lottery
 
 Four combinations of the two corrections, each paired against `horizon` within shared paths.

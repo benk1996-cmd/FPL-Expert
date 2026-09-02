@@ -1,0 +1,89 @@
+  ridge 0.0   2022-23 early n=56   CS 0.6233  goals 1.5658  mkt 0.5546
+  ridge 0.0   2022-23 late  n=212  CS 0.5572  goals 1.5407  mkt 0.5323
+  ridge 0.0   2023-24 early n=36   CS 0.4799  goals 1.3873  mkt 0.4797
+  ridge 0.0   2023-24 late  n=178  CS 0.4837  goals 1.5644  mkt 0.4713
+  ridge 0.0   2024-25 early n=58   CS 0.4767  goals 1.4157  mkt 0.4326
+  ridge 0.0   2024-25 late  n=188  CS 0.5526  goals 1.5199  mkt 0.5566
+  ridge 0.0   2025-26 early n=38   CS 0.7758  goals 1.6591  mkt 0.6421
+  ridge 0.0   2025-26 late  n=162  CS 0.5380  goals 1.4869  mkt 0.5187
+  ridge 0.0   2026-27 early n=36   CS 0.4618  goals 1.4703  mkt 0.5102
+  ridge 0.5   2022-23 early n=56   CS 0.5687  goals 1.5169  mkt 0.5546
+  ridge 0.5   2022-23 late  n=212  CS 0.5558  goals 1.5380  mkt 0.5323
+  ridge 0.5   2023-24 early n=36   CS 0.4803  goals 1.3896  mkt 0.4797
+  ridge 0.5   2023-24 late  n=178  CS 0.4820  goals 1.5618  mkt 0.4713
+  ridge 0.5   2024-25 early n=58   CS 0.4349  goals 1.3786  mkt 0.4326
+  ridge 0.5   2024-25 late  n=188  CS 0.5527  goals 1.5196  mkt 0.5566
+  ridge 0.5   2025-26 early n=38   CS 0.7053  goals 1.5330  mkt 0.6421
+  ridge 0.5   2025-26 late  n=162  CS 0.5363  goals 1.4848  mkt 0.5187
+  ridge 0.5   2026-27 early n=36   CS 0.4756  goals 1.4748  mkt 0.5102
+  ridge 1.0   2022-23 early n=56   CS 0.5592  goals 1.5082  mkt 0.5546
+  ridge 1.0   2022-23 late  n=212  CS 0.5545  goals 1.5358  mkt 0.5323
+  ridge 1.0   2023-24 early n=36   CS 0.4818  goals 1.3925  mkt 0.4797
+  ridge 1.0   2023-24 late  n=178  CS 0.4804  goals 1.5597  mkt 0.4713
+  ridge 1.0   2024-25 early n=58   CS 0.4321  goals 1.3776  mkt 0.4326
+  ridge 1.0   2024-25 late  n=188  CS 0.5526  goals 1.5190  mkt 0.5566
+  ridge 1.0   2025-26 early n=38   CS 0.6943  goals 1.5194  mkt 0.6420
+  ridge 1.0   2025-26 late  n=162  CS 0.5352  goals 1.4832  mkt 0.5187
+  ridge 1.0   2026-27 early n=36   CS 0.4836  goals 1.4798  mkt 0.5102
+  ridge 2.0   2022-23 early n=56   CS 0.5511  goals 1.4995  mkt 0.5546
+  ridge 2.0   2022-23 late  n=212  CS 0.5524  goals 1.5326  mkt 0.5323
+  ridge 2.0   2023-24 early n=36   CS 0.4849  goals 1.3980  mkt 0.4797
+  ridge 2.0   2023-24 late  n=178  CS 0.4778  goals 1.5564  mkt 0.4713
+  ridge 2.0   2024-25 early n=58   CS 0.4318  goals 1.3790  mkt 0.4327
+  ridge 2.0   2024-25 late  n=188  CS 0.5523  goals 1.5180  mkt 0.5566
+  ridge 2.0   2025-26 early n=38   CS 0.6853  goals 1.5112  mkt 0.6420
+  ridge 2.0   2025-26 late  n=162  CS 0.5336  goals 1.4809  mkt 0.5187
+  ridge 2.0   2026-27 early n=36   CS 0.4919  goals 1.4871  mkt 0.5102
+  ridge 5.0   2022-23 early n=56   CS 0.5447  goals 1.4895  mkt 0.5546
+  ridge 5.0   2022-23 late  n=212  CS 0.5483  goals 1.5271  mkt 0.5323
+  ridge 5.0   2023-24 early n=36   CS 0.4933  goals 1.4108  mkt 0.4797
+  ridge 5.0   2023-24 late  n=178  CS 0.4724  goals 1.5503  mkt 0.4713
+  ridge 5.0   2024-25 early n=58   CS 0.4357  goals 1.3856  mkt 0.4327
+  ridge 5.0   2024-25 late  n=188  CS 0.5515  goals 1.5159  mkt 0.5565
+  ridge 5.0   2025-26 early n=38   CS 0.6786  goals 1.5116  mkt 0.6420
+  ridge 5.0   2025-26 late  n=162  CS 0.5314  goals 1.4776  mkt 0.5187
+  ridge 5.0   2026-27 early n=36   CS 0.5014  goals 1.5009  mkt 0.5102
+  ridge 10.0  2022-23 early n=56   CS 0.5443  goals 1.4852  mkt 0.5545
+  ridge 10.0  2022-23 late  n=212  CS 0.5451  goals 1.5243  mkt 0.5323
+  ridge 10.0  2023-24 early n=36   CS 0.5034  goals 1.4258  mkt 0.4797
+  ridge 10.0  2023-24 late  n=178  CS 0.4672  goals 1.5461  mkt 0.4713
+  ridge 10.0  2024-25 early n=58   CS 0.4422  goals 1.3956  mkt 0.4328
+  ridge 10.0  2024-25 late  n=188  CS 0.5510  goals 1.5149  mkt 0.5565
+  ridge 10.0  2025-26 early n=38   CS 0.6780  goals 1.5217  mkt 0.6419
+  ridge 10.0  2025-26 late  n=162  CS 0.5305  goals 1.4763  mkt 0.5187
+  ridge 10.0  2026-27 early n=36   CS 0.5076  goals 1.5156  mkt 0.5102
+
+=== CLEAN SHEET log loss, mean (lower better) ===
+phase   early    late
+ridge                
+0.0    0.5635  0.5329
+0.5    0.5329  0.5317
+1.0    0.5302  0.5307
+2.0    0.5290  0.5290
+5.0    0.5307  0.5259
+10.0   0.5351  0.5235
+
+=== GOALS CONCEDED negative log likelihood, mean ===
+phase   early    late
+ridge                
+0.0    1.4996  1.5280
+0.5    1.4586  1.5260
+1.0    1.4555  1.5244
+2.0    1.4550  1.5220
+5.0    1.4597  1.5178
+10.0   1.4688  1.5154
+
+=== EARLY clean sheet, per season (ground rule 2) ===
+season  2022-23  2023-24  2024-25  2025-26  2026-27
+ridge                                              
+0.0      0.6233   0.4799   0.4767   0.7758   0.4618
+0.5      0.5687   0.4803   0.4349   0.7053   0.4756
+1.0      0.5592   0.4818   0.4321   0.6943   0.4836
+2.0      0.5511   0.4849   0.4318   0.6853   0.4919
+5.0      0.5447   0.4933   0.4357   0.6786   0.5014
+10.0     0.5443   0.5034   0.4422   0.6780   0.5076
+
+=== market benchmark (closing line), early ===
+season  2022-23  2023-24  2024-25  2025-26  2026-27
+ridge                                              
+0.0      0.5546   0.4797   0.4326   0.6421   0.5102

@@ -219,3 +219,80 @@ def test_match_features_emits_one_row_per_team_with_mirrored_fields():
     assert home["p_win"] == pytest.approx(away["p_lose"])
     assert home["p_clean_sheet"] > away["p_clean_sheet"]
     assert home["expected_conceded_penalty"] > away["expected_conceded_penalty"]
+
+
+def test_ridge_stops_a_two_match_team_pinning_a_parameter_to_its_bound():
+    """Quasi-complete separation, and what it did to the live model.
+
+    Hull City were promoted, so they had no prior-season data at all. Two matches, both won,
+    ZERO conceded — and the likelihood is then monotone in their defence parameter, so the
+    optimiser walked to the bound at 3.000 and stopped only because `bounds` was there. The
+    model forecast Liverpool to score 0.10 goals at home to them, which drove a clean-sheet
+    probability near certainty and made GBP 4.0m Hull defenders the best assets in the game.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from fpl_expert.models.match_sim import DixonColes
+
+    rng = np.random.default_rng(0)
+    established = [f"Team{i}" for i in range(6)]
+    rows = []
+    for season, day in ((s, d) for s in range(3) for d in range(20)):
+        for i in range(0, 6, 2):
+            rows.append({
+                "date": pd.Timestamp("2024-01-01") + pd.Timedelta(days=season * 400 + day),
+                "home_team": established[i], "away_team": established[i + 1],
+                "home_goals": rng.poisson(1.4), "away_goals": rng.poisson(1.1),
+            })
+    # a newcomer with two matches and a perfect defensive record
+    for k in range(2):
+        rows.append({
+            "date": pd.Timestamp("2026-08-22") + pd.Timedelta(days=7 * k),
+            "home_team": "Newcomer", "away_team": established[k],
+            "home_goals": 2, "away_goals": 0,
+        })
+    matches = pd.DataFrame(rows)
+
+    unpenalised = DixonColes(ridge=0.0).fit(matches)
+    shrunk = DixonColes(ridge=0.5).fit(matches)
+
+    assert unpenalised.defence["Newcomer"] > 2.5, "expected the degenerate fit to hit the bound"
+    assert shrunk.defence["Newcomer"] < unpenalised.defence["Newcomer"]
+
+    # the point of the fix: a plausible number of goals against the newcomer
+    scored_unpen, _ = unpenalised.lambdas(established[0], "Newcomer")
+    scored_shrunk, _ = shrunk.lambdas(established[0], "Newcomer")
+    assert scored_unpen < 0.5, "the unpenalised fit should predict almost no goals"
+    assert scored_shrunk > scored_unpen * 2
+
+
+def test_ridge_barely_moves_a_team_with_a_long_record():
+    """Shrinkage must be proportional to how little evidence there is, or it would flatten
+    every genuine difference in the league."""
+    import numpy as np
+    import pandas as pd
+
+    from fpl_expert.models.match_sim import DixonColes
+
+    rng = np.random.default_rng(1)
+    rows = []
+    for day in range(120):
+        rows.append({
+            "date": pd.Timestamp("2024-01-01") + pd.Timedelta(days=day * 3),
+            "home_team": "Strong", "away_team": "Weak",
+            "home_goals": rng.poisson(2.6), "away_goals": rng.poisson(0.6),
+        })
+        rows.append({
+            "date": pd.Timestamp("2024-01-01") + pd.Timedelta(days=day * 3),
+            "home_team": "Weak", "away_team": "Strong",
+            "home_goals": rng.poisson(0.6), "away_goals": rng.poisson(2.4),
+        })
+    matches = pd.DataFrame(rows)
+
+    plain = DixonColes(ridge=0.0).fit(matches)
+    shrunk = DixonColes(ridge=0.5).fit(matches)
+    moved = abs(shrunk.attack["Strong"] - plain.attack["Strong"])
+
+    assert moved < 0.15, f"a 240-match record should barely move, moved {moved:.3f}"
+    assert shrunk.attack["Strong"] > shrunk.attack["Weak"], "the real gap must survive"
