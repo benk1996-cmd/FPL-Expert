@@ -153,6 +153,25 @@ def list_snapshots() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def servable_gameweek() -> int | None:
+    """The gameweek a bundle should be built FOR: the newest one we hold a pre-deadline
+    snapshot of.
+
+    Not the newest gameweek in the archive — that one has been PLAYED, and a bundle is
+    forward-looking advice about a gameweek still to come. Not the API's `next_gameweek`
+    either, which would keep `publish` honest but make it need the network and let it target a
+    gameweek no snapshot covers, failing deep inside the pipeline. Derived from the snapshots
+    because those are exactly the gameweeks `PointInTime.for_gameweek` can serve.
+    """
+    manifests = list_snapshots()
+    if manifests.empty:
+        return None
+    eligible = manifests[manifests["taken_before_deadline"].fillna(False)]
+    if eligible.empty:
+        return None
+    return int(eligible.sort_values("stamp").iloc[-1]["target_gw"])
+
+
 # Hours before a deadline at which we want a snapshot. Escalating rather than one-and-done
 # for two reasons. Freshness: a capture 24h out misses the Friday press conferences, and
 # `PointInTime` always uses the LATEST pre-deadline snapshot, so a later one is strictly

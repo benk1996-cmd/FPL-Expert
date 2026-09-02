@@ -189,3 +189,37 @@ def test_planning_still_prefers_a_real_pre_deadline_snapshot(tmp_config):
     listed = list_snapshots()
     covered = int(listed.loc[listed["taken_before_deadline"], "target_gw"].dropna().iloc[0])
     assert PointInTime.for_planning(covered).stamp == PointInTime.for_gameweek(covered).stamp
+
+
+def test_servable_gameweek_is_the_newest_snapshotted_not_the_newest_played(tmp_config):
+    """`fpl publish` used to default to `--gw 1`, so a bare run rebuilt the bundle for the
+    OPENING gameweek and the front end served eleven-day-old advice as current.
+
+    The replacement is deliberately NOT "the latest gameweek in the archive" — that one has
+    been played, and a bundle is forward-looking advice about a gameweek still to come. It is
+    the newest gameweek we hold a pre-deadline snapshot of, because those are exactly the ones
+    `PointInTime.for_gameweek` can serve.
+    """
+    from fpl_expert.data.snapshot import servable_gameweek
+
+    assert servable_gameweek() is None                      # nothing captured yet
+
+    for stamp, gw, before in [
+        ("20260821T120000Z", 1, True),
+        ("20260828T120000Z", 2, True),
+        ("20260904T120000Z", 3, True),
+    ]:
+        write_raw(_manifest(stamp, gw, before), "snapshot", "manifest", stamp=stamp)
+    assert servable_gameweek() == 3
+
+
+def test_a_post_deadline_capture_is_never_servable(tmp_config):
+    """Recorded, but not usable as features — so it must not become a publish target."""
+    from fpl_expert.data.snapshot import servable_gameweek
+
+    write_raw(_manifest("20260828T120000Z", 2, True), "snapshot", "manifest",
+              stamp="20260828T120000Z")
+    write_raw(_manifest("20260904T180000Z", 3, False), "snapshot", "manifest",
+              stamp="20260904T180000Z")
+
+    assert servable_gameweek() == 2

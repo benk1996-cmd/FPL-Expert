@@ -128,3 +128,32 @@ GW2: already hold a snapshot inside the 24.0h checkpoint
 GW2: already hold a snapshot inside the 24.0h checkpoint
 GW2: already hold a snapshot inside the 24.0h checkpoint
 GW2: already hold a snapshot inside the 24.0h checkpoint
+GW2 deadline in 2.8h — capturing for the 6.0h checkpoint
+22:43:52 INFO    fpl_expert.data.snapshot | snapshot 20260828T144349Z: GW2, 2.77h to deadline, before_deadline=True
+  stamp                  20260828T144349Z
+  target_gw              2
+  deadline               2026-08-28T17:30:00+00:00
+  taken_before_deadline  True
+  hours_to_deadline      2.77
+  players                619
+  fixtures               380
+  odds_rows              10
+GW2: already hold a snapshot inside the 6.0h checkpoint
+GW2 deadline in 1.5h — capturing for the 2.0h checkpoint
+00:00:06 INFO    fpl_expert.data.snapshot | snapshot 20260828T160003Z: GW2, 1.50h to deadline, before_deadline=True
+  stamp                  20260828T160003Z
+  target_gw              2
+  deadline               2026-08-28T17:30:00+00:00
+  taken_before_deadline  True
+  hours_to_deadline      1.5
+  players                620
+  fixtures               380
+  odds_rows              10
+^CGW3 deadline is 123.5h away (earliest checkpoint 48.0h)
+GW3 deadline is 122.5h away (earliest checkpoint 48.0h)
+GW3 deadline is 100.5h away (earliest checkpoint 48.0h)
+GW3 deadline is 100.5h away (earliest checkpoint 48.0h)
+GW3 deadline is 99.5h away (earliest checkpoint 48.0h)
+^C^C^C^CGW3 deadline is 74.5h away (earliest checkpoint 48.0h)
+GW3 deadline is 59.0h away (earliest checkpoint 48.0h)
+GW3 deadline is 58.5h away (earliest checkpoint 48.0h)

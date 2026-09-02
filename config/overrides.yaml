@@ -16,12 +16,4 @@
 # Every entry logs a WARNING when it fires, when it expires, and when it matches nobody.
 # Delete entries once FPL catches up; leaving them is harmless only until FPL disagrees.
 
-availability:
-  - web_name: Watkins
-    id: 55
-    status: u
-    until: 2026-09-05
-    reason: >-
-      Reported to be leaving Aston Villa. FPL still lists him a/Aston Villa with no news as of
-      2026-08-24, so this asserts the departure ahead of the feed. DELETE once FPL flags him,
-      or once the window closes and he has not moved.
+availability: []

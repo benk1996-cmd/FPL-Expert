@@ -1,29 +1,29 @@
 {
-  "gameweek": 2,
+  "gameweek": 3,
   "gameweeks": [
-    2,
     3,
     4,
     5,
     6,
-    7
+    7,
+    8
   ],
   "horizon": 6,
   "points_col": "horizon_points",
-  "built_at": "2026-08-25T16:08:25+00:00",
-  "players": 609,
+  "built_at": "2026-09-02T06:57:00+00:00",
+  "players": 629,
   "variants": {
     "standard": {
       "squad_cost": 100.0,
-      "expected_points": 65.26,
-      "captain": "B.Fernandes",
-      "vice_captain": "Haaland"
+      "expected_points": 79.13,
+      "captain": "Haaland",
+      "vice_captain": "Tzolakis"
     }
   },
   "squad_cost": 100.0,
-  "expected_points": 65.26,
-  "captain": "B.Fernandes",
-  "vice_captain": "Haaland",
+  "expected_points": 79.13,
+  "captain": "Haaland",
+  "vice_captain": "Tzolakis",
   "has_prices": false,
   "has_fixtures": true
 }

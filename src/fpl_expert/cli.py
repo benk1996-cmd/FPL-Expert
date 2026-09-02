@@ -870,7 +870,9 @@ def report(
 
 @app.command()
 def publish(
-    gw: int = typer.Option(1, "--gw"),
+    gw: int = typer.Option(
+        None, "--gw", help="Gameweek to build for; defaults to the newest one snapshotted"
+    ),
     horizon: int = typer.Option(None, "--horizon", help="Gameweeks to value over"),
     out: str = typer.Option(None, "--out", help="Bundle directory (default data/serving)"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -888,12 +890,23 @@ def publish(
     import warnings
 
     from .config import load_config, load_scoring_rules, project_root
+    from .data.snapshot import servable_gameweek
     from .data.storage import read_table
     from .optimise.squad import select_squad
     from .serving import fixture_grid, write_bundle
 
     warnings.filterwarnings("ignore")
     cfg, rules = load_config(), load_scoring_rules()
+    if gw is None:
+        # Previously this defaulted to 1, so a bare `fpl publish` silently rebuilt the bundle
+        # for the OPENING gameweek and the front end served eleven-day-old advice as current.
+        gw = servable_gameweek()
+        if gw is None:
+            raise typer.BadParameter(
+                "no pre-deadline snapshot exists, so there is no gameweek to publish for — "
+                "run `fpl snapshot` before the deadline, or pass --gw explicitly"
+            )
+        typer.echo(f"publishing for GW{gw} (newest snapshotted gameweek)")
     span = horizon if horizon is not None else cfg.optimise.horizon_gws
     directory = Path(out) if out else project_root() / "data" / "serving"
 
