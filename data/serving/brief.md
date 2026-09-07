@@ -1,48 +1,55 @@
 # Gameweek 3 brief
 
-**Squad cost** £99.7m  ·  **expected points** 73.8  ·  **captain** Haaland (vice Saka)
+**Squad cost** £100.0m  ·  **expected points** 69.5  ·  **captain** Haaland (vice B.Fernandes)
 
 ## Starting XI
 ```
-  web_name position      team  price  expected_points
-  Tzolakis       GK Hull City    4.5             5.36
-     Guéhi      DEF  Man City    6.0             6.03
-      Egan      DEF Hull City    4.0             5.50
-   Gabriel      DEF   Arsenal    8.0             5.17
-     Ajayi      DEF Hull City    4.1             5.16
-Szoboszlai      MID Liverpool    7.0             6.43
-      Saka      MID   Arsenal    9.5             6.00
- M.Sangaré      MID Brentford    5.7             5.61
-  Anderson      MID  Man City    6.4             5.33
-   Haaland      FWD  Man City   15.5             8.28
-      Isak      FWD Liverpool    9.0             6.63
+   web_name position          team  price  expected_points
+   Tzolakis       GK     Hull City    4.6             5.39
+      Guéhi      DEF      Man City    6.0             5.92
+       Egan      DEF     Hull City    4.0             5.45
+    Gabriel      DEF       Arsenal    8.0             5.19
+      Ajayi      DEF     Hull City    4.1             5.11
+ Szoboszlai      MID     Liverpool    7.0             6.44
+Gibbs-White      MID Nott'm Forest    7.9             5.29
+B.Fernandes      MID       Man Utd   12.0             5.28
+   Anderson      MID      Man City    6.4             5.17
+       Groß      MID      Brighton    5.5             4.57
+    Haaland      FWD      Man City   15.5             7.83
 ```
 
 ## Bench
 ```
-     web_name position      team  price  expected_points
-        Dedić      DEF Newcastle    4.5             4.36
-Calvert-Lewin      FWD     Leeds    6.0             3.74
-        Gomez      MID  Brighton    5.0             4.05
-   Verbruggen       GK  Brighton    4.5             3.21
+   web_name position         team  price  expected_points
+      Dedić      DEF    Newcastle    4.5             4.38
+      Barry      FWD      Everton    5.5             3.20
+ Verbruggen       GK     Brighton    4.5             3.21
+Walle Egeli      FWD Ipswich Town    4.5             0.39
 ```
 
 ## Captaincy
 `cost_vs_best` is what you give up by overriding the recommendation.
 ```
   web_name      team  expected_points  captain_points  cost_vs_best
-   Haaland  Man City             8.28           16.56          0.00
-      Isak Liverpool             6.63           13.26          3.30
-Szoboszlai Liverpool             6.43           12.86          3.70
-     Guéhi  Man City             6.03           12.06          4.50
-      Saka   Arsenal             6.00           12.00          4.56
+   Haaland  Man City             7.83           15.65          0.00
+Szoboszlai Liverpool             6.44           12.89          2.76
+     Guéhi  Man City             5.92           11.84          3.81
+      Egan Hull City             5.45           10.90          4.75
+  Tzolakis Hull City             5.39           10.79          4.86
 ```
 
 ## Chips
 **Hold.** Nothing this week beats what the remaining windows offer.
 ```
-bench boost        15.4
-triple captain      8.3
+bench boost        11.2
+triple captain      7.8
+```
+
+## Availability risk
+Squad members the minutes model rates below 70% to appear.
+```
+   web_name position         team  p_appear  expected_minutes
+Walle Egeli      FWD Ipswich Town      0.23              7.19
 ```
 
 ## Caveats

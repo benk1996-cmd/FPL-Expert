@@ -1,0 +1,5 @@
+21:51:34 INFO    fpl_expert.data.current_season | settled gameweeks: [1, 2, 3]
+22:02:28 INFO    fpl_expert.data.current_season | 1890 rows, 654 players, GW 1-3
+22:02:28 INFO    fpl_expert.data.current_season | wrote interim/history season=2026-27 (1890 rows)
+  1,890 rows  654 players  GW 1-3  season 2026-27
+  929 appearances, 80 goals recorded

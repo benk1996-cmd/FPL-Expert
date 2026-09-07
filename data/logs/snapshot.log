@@ -159,3 +159,15 @@ GW3 deadline is 59.0h away (earliest checkpoint 48.0h)
 GW3 deadline is 58.5h away (earliest checkpoint 48.0h)
 GW3 deadline is 57.5h away (earliest checkpoint 48.0h)
 GW3 deadline is 56.5h away (earliest checkpoint 48.0h)
+^C^C^CGW3: already hold a snapshot inside the 48.0h checkpoint
+GW3: already hold a snapshot inside the 48.0h checkpoint
+^C^CGW4 deadline is 165.5h away (earliest checkpoint 48.0h)
+^CGW4 deadline is 149.8h away (earliest checkpoint 48.0h)
+GW4 deadline is 149.5h away (earliest checkpoint 48.0h)
+GW4 deadline is 148.5h away (earliest checkpoint 48.0h)
+^CGW4 deadline is 142.5h away (earliest checkpoint 48.0h)
+GW4 deadline is 141.5h away (earliest checkpoint 48.0h)
+^C^C^C
+Aborted.
+GW4 deadline is 118.5h away (earliest checkpoint 48.0h)
+GW4 deadline is 117.5h away (earliest checkpoint 48.0h)

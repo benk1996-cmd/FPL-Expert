@@ -11,6 +11,7 @@ import gzip
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -69,20 +70,46 @@ class HttpClient:
         return self.cache_dir / f"{hashlib.sha1(url.encode()).hexdigest()}.json.gz"
 
     def _read_cache(self, url: str) -> Any | None:
+        """A cached payload, or None to refetch.
+
+        A CORRUPT entry counts as a miss. The cache is disposable by definition, so the only
+        thing a damaged file should ever cost is one refetch — but it used to propagate an
+        `EOFError` out of Typer as a bare "Aborted." with no message and no clue which file.
+        A killed `fpl results` left a half-written `bootstrap-static` entry and every command
+        in the project failed that way until it was found by hand.
+        """
         path = self._cache_path(url)
         if path is None or not path.exists():
             return None
         if time.time() - path.stat().st_mtime > self.cache_ttl:
             return None
-        with gzip.open(path, "rt", encoding="utf-8") as fh:
-            return json.load(fh)
+        try:
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, EOFError, json.JSONDecodeError) as exc:
+            log.warning("discarding corrupt cache entry for %s (%s)", url, exc)
+            path.unlink(missing_ok=True)
+            return None
 
     def _write_cache(self, url: str, payload: Any) -> None:
+        """Write atomically: a killed process must not leave a truncated entry behind.
+
+        Streaming into the open gzip handle meant an interrupt part-way through produced a
+        file that looked valid and failed on read. Same defect as `storage.write_raw` had, in
+        a second place — write to a temporary file in the same directory and rename, which is
+        atomic on the filesystems this runs on.
+        """
         path = self._cache_path(url)
         if path is None:
             return
-        with gzip.open(path, "wt", encoding="utf-8") as fh:
-            json.dump(payload, fh)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        try:
+            with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            tmp.replace(path)
+        except OSError as exc:                      # a cache write must never fail a request
+            log.warning("could not cache %s: %s", url, exc)
+            tmp.unlink(missing_ok=True)
 
     def get_json(self, url: str, *, use_cache: bool = True, allow_404: bool = False) -> Any | None:
         """Fetch and parse JSON.
