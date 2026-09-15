@@ -158,6 +158,7 @@ pip install -e .
 ## Usage
 
 ```bash
+fpl weekly     # THE WEEKLY ONE-LINER: results, odds, update, minutes, snapshot, publish
 fpl status     # where the season is, and what rules are loaded
 fpl update     # pull the current season's core feeds from the FPL API
 fpl history    # download past seasons + print the column-coverage report
@@ -205,11 +206,49 @@ so a stale copy is misleading rather than harmful.
 > `storage.partition_report("processed", "sim_forecasts")`, which warns when write times
 > disagree.
 
-### Before the GW1 deadline
+### The weekly routine
 
-The live commands are current in code but their inputs are only as fresh as the last pull.
-Run `fpl results` after each gameweek is checked — without it the rates are built from prior seasons alone and a player's form at a new club counts for nothing. Then run `fpl update` (prices, availability, fixtures move daily) and `fpl snapshot` close to the
-deadline.
+```bash
+fpl weekly                 # once the last gameweek is checked, ~15 minutes
+fpl myteam --brief out.md  # then read the brief
+```
+
+`fpl weekly` runs the six refresh steps in the order the pipeline requires, and the order is
+not cosmetic:
+
+| step | why it sits there |
+|---|---|
+| `results` | the gameweek just played, into the training archive. Must precede `minutes`, or the retrain misses it. The slow one — ~650 polite requests, about eleven minutes. |
+| `odds` | current-season matches for the match model. **Passed the season explicitly**, because `fpl odds` bare defaults to the list of COMPLETED seasons and silently fetches nothing. |
+| `update` | prices, availability and fixtures, which move daily. |
+| `minutes` | retrain including the new gameweek. |
+| `snapshot` | pre-deadline state. `publish` reads the target gameweek through the strict point-in-time accessor and fails outright without one. |
+| `publish` | the bundle the front end serves, built on everything above. |
+
+**A failing step does not abort the run** — losing eleven minutes of ingestion because the odds
+feed was down is the failure mode this exists to prevent. Failures are collected into a summary
+and the exit code is non-zero if any step failed. `results` reporting "no settled gameweeks yet"
+is normal mid-week and shows as SKIPPED, not FAILED.
+
+`--only` and `--skip` select steps and always run them in pipeline order, never in flag order:
+
+```bash
+fpl weekly --skip minutes          # everything but the retrain
+fpl weekly --only snapshot --only publish   # late-week refresh before a deadline
+fpl weekly --evaluate              # also walk-forward score the minutes model (slow)
+```
+
+Without it, the equivalent by hand — and note the `--season`, which is the step most easily got
+wrong:
+
+```bash
+fpl results
+fpl odds --season 2026-27
+fpl update
+fpl minutes
+fpl snapshot
+fpl publish
+```
 
 ## Data layers
 

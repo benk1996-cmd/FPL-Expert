@@ -1193,6 +1193,106 @@ def snapshots(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
             typer.secho(f"\nno pre-deadline snapshot for GW {missing}", fg=typer.colors.YELLOW)
 
 
+# The order is not arbitrary and each step has bitten us in the order given.
+#
+#   results   must come before `minutes`, or the model retrains without the gameweek just
+#             played. It is also the slow one: ~650 polite requests, about eleven minutes.
+#   odds      MUST be given the current season explicitly. `ingest_odds` defaults to
+#             `cfg.data.history_seasons`, which lists COMPLETED seasons, so a bare `fpl odds`
+#             reports success and fetches nothing — Dixon-Coles then fits the promoted clubs
+#             on zero current-season matches and pins their parameters to the bounds.
+#   snapshot  must come before `publish`, which reads the target gameweek through the strict
+#             point-in-time accessor and fails outright without a pre-deadline capture.
+#   publish   last, so the bundle is built on everything above.
+WEEKLY_STEPS = ("results", "odds", "update", "minutes", "snapshot", "publish")
+
+
+@app.command()
+def weekly(
+    skip: list[str] = typer.Option(
+        None, "--skip", help=f"Steps to omit. One of: {', '.join(WEEKLY_STEPS)}"
+    ),
+    only: list[str] = typer.Option(None, "--only", help="Run just these steps, in order"),
+    evaluate: bool = typer.Option(
+        False, "--evaluate/--no-evaluate",
+        help="Walk-forward score the minutes model as it retrains (slow)",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Run the whole weekly refresh: ingest, update, retrain, snapshot, publish.
+
+    Equivalent to the six commands below, in this order, and the order matters:
+
+        fpl results                   # the gameweek just played, into the training archive
+        fpl odds --season <current>   # current-season matches for the match model
+        fpl update                    # prices, availability, fixtures
+        fpl minutes                   # retrain including the new gameweek
+        fpl snapshot                  # pre-deadline state, which `publish` requires
+        fpl publish                   # the bundle the front end serves
+
+    **A failing step does not abort the run.** Each is independent enough to be worth
+    attempting even if an earlier one failed, and the alternative — losing eleven minutes of
+    ingestion because the odds feed was down — is worse. Failures are collected and reported
+    at the end, and the exit code is non-zero if any step failed.
+
+    `results` raising "no settled gameweeks yet" is normal mid-week rather than a failure, and
+    is reported as SKIPPED.
+    """
+    _setup_logging(verbose)
+    import time
+
+    season = str(load_config().project.get("season", "")).replace("/", "-")
+    chosen = [s for s in WEEKLY_STEPS if s in (only or WEEKLY_STEPS) and s not in (skip or ())]
+    unknown = [s for s in [*(only or ()), *(skip or ())] if s not in WEEKLY_STEPS]
+    if unknown:
+        raise typer.BadParameter(f"unknown step(s) {unknown}; choose from {list(WEEKLY_STEPS)}")
+
+    actions = {
+        "results": lambda: results(gw=None, verbose=verbose),
+        "odds": lambda: odds(seasons=[season], verbose=verbose),
+        "update": lambda: update(verbose=verbose),
+        "minutes": lambda: minutes(evaluate=evaluate, verbose=verbose),
+        "snapshot": lambda: snapshot(
+            if_due=False, checkpoints="", reason="weekly refresh", verbose=verbose
+        ),
+        "publish": lambda: publish(gw=None, horizon=None, out=None, verbose=verbose),
+    }
+
+    outcomes: list[tuple[str, str, float, str]] = []
+    for name in chosen:
+        typer.secho("", nl=True)
+        typer.secho(f"=== {name} " + "=" * (60 - len(name)), fg=typer.colors.CYAN)
+        started = time.monotonic()
+        try:
+            actions[name]()
+            outcomes.append((name, "ok", time.monotonic() - started, ""))
+        except Exception as exc:  # noqa: BLE001 - one step must not take the rest with it
+            elapsed = time.monotonic() - started
+            benign = "no settled gameweeks" in str(exc)
+            detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            outcomes.append((name, "skipped" if benign else "FAILED", elapsed, detail))
+            typer.secho(
+                f"  {name}: {'nothing to do' if benign else 'failed'} - {detail}",
+                fg=typer.colors.YELLOW if benign else typer.colors.RED,
+            )
+
+    typer.secho("", nl=True)
+    typer.secho("=== summary " + "=" * 56, fg=typer.colors.CYAN)
+    for name, state, elapsed, detail in outcomes:
+        colour = {"ok": typer.colors.GREEN, "skipped": typer.colors.YELLOW}.get(
+            state, typer.colors.RED
+        )
+        typer.secho(f"  {name:<10} {state:<8} {elapsed:6.1f}s  {detail[:60]}", fg=colour)
+
+    failed = [n for n, s, _, _ in outcomes if s == "FAILED"]
+    if failed:
+        typer.secho("", nl=True)
+        typer.secho(f"{len(failed)} step(s) failed: {', '.join(failed)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    typer.secho("", nl=True)
+    typer.secho("weekly refresh complete", fg=typer.colors.GREEN)
+
+
 @app.command()
 def status(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
     """Show where the season is and what the loaded rules say."""
